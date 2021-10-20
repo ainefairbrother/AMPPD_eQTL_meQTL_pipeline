@@ -1,0 +1,3 @@
+The pipeline used to generate the 'meth files' that are then bound using the script bind_meth_files_to_matrix.py was run on the Terra platform and is available at: https://portal.firecloud.org/?return=terra#methods/aine_fb_ucl/calculate_mismatch_proportion_workflow/14
+
+The workflow was run on the 2020_v2release_1218/ release simply to cover more samples, and allow flexibility but the matrices can be filtered down to the 2019 sample set to be compatible with 2019-release -based analyses. 
