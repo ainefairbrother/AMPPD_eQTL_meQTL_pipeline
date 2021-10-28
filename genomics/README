@@ -1,0 +1,16 @@
+-------------------------------
+Author: Aine Fairbrother-Browne  
+README last updated: 28/10/21  
+-------------------------------
+
+    + Directory description: all scripts involved in the processing of AMP-PD genomic data (gvcf files)  
+    + Directory content: The directory consists of scripts copied from and executable on Rosalind (X, 01-05), and scripts executable on the RytenLab server (06)  
+         + X-compress_and_index_vcfs.sh: this script is not numbered explicitly, as it was used at various stages of vcf processing - it is needed to bgzip and index vcfs  
+         + 01-filter_vcf_files.sh: this script filters the vcf files for MAF > 1% --maf, missing data < 1% (0.01) --max-missing and HWE P>0.001 --hwe  
+         + 02-generate_cohort_sampleid_lists.sh: this script generates sample lists used to separate each chr vcf file 
+         + 03-separate_vcf_chr_files_by_cohort.sh: this file uses the lists generated above to filter each chr vcf file into three cohort files i.e. chrX > chrX_PD, chrX_PP, chrX_BF  
+         + 04-concatenate_cohort_chr_vcfs.sh: combines all cohort chrs to generate one single cohort vcf file 
+         + 05-make_bed_bim_from_vcf.sh: takes in single cohort file and generates 3 new files: bed, bim, fam. These are needed as .bed is the format for bigsnpr (to generate genetic PCs)  
+         + 06-running-bigsnpr.R: runs the bigsnpr workflow to SNP thin, remove long-range LD and generate genetic PCs. The results of this are then visualised in the notebook ./notebooks/AMPPD-generating-gPCs.Rmd
+
+-------------------------------

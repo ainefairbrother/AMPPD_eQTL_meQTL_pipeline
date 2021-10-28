@@ -1,6 +1,6 @@
 -------------------------------
 Author: Aine Fairbrother-Browne  
-README last updated: 22/10/21  
+README last updated: 28/10/21  
 -------------------------------
 
     + Directory description: all scripts involved in the processing of AMP-PD transcriptomic data (featurecount files)  
@@ -10,6 +10,5 @@ README last updated: 22/10/21
         + 01-counts2TPM: this script contains a function that converts a count matrix to a TPM matrix  
             + The input to 01-counts2TPM is an AMP-PD featurecounts file that can be found at: https://console.cloud.google.com/storage/browser/_details/amp-pd-transcriptomics/releases/2020_v2release_1218/rnaseq/subread/feature-counts/matrix.featureCounts.tsv;tab=live_object  
         + 02-log10MedNormalise: this script contains a function that log10 transforms, then median normalises a TPM matrix  
-        + the *_run_peertool.sh scripts are runnable on a server with the following software installed: https://github.com/PMBio/peer. These scripts run PEER for 1 dataset each, with all output stored in a directory with the dataset name  
-
+        + the *_run_peertool.sh scripts in ./03-run_peer are runnable on a server with the following software installed: https://github.com/PMBio/peer. These scripts run PEER for 1 dataset each, with all output stored in a directory with the dataset name  
 -------------------------------
