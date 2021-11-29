@@ -16,6 +16,6 @@ README last updated: 28/10/21
          + 07-generate_geno_mat_from_vcf.sh  
          + 08a-wrangle_geno_mat_for_matrixeqtl.R: script to assign snp pos labels and sample ID labels to the 012 matrix, then split into cohort, case and control for downstream analyses  
          + At this stage, I transfered from Rosalind to RytenLab using the local bridge script: /Users/ainefairbrother/Desktop/rosalind2ryten.sh  
-         + 08b-wrangle_geno_mat_for_matrixeqtl.R  
+         + 08b-wrangle_geno_mat_for_matrixeqtl.R: this script formats the matrix for use in MatrixEQTL downstream  
          + 99-compress_and_index_vcfs.sh: this script is not numbered explicitly, as it was used at various stages of vcf processing - it is needed to bgzip and index vcfs  
 -------------------------------
