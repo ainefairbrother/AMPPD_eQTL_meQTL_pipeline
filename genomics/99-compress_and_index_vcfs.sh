@@ -4,7 +4,7 @@
 
 cd /scratch/groups/hodgkinsonlab/aine/data/amppd_vcf_files
 
-for i in $(ls *.vcf);
+for i in $(ls *.filtered.vcf);
 do
 
 echo ${i};

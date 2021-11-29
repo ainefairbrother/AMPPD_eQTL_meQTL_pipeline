@@ -8,8 +8,11 @@ setwd("/home/abrowne/projects/amppd_analysis/")
 plot.out="/home/abrowne/projects/amppd_analysis/results/AMPPD_gPC_results/"
 data.out="/home/abrowne/projects/amppd_analysis/data/bigsnpr_gPC_output/"
 
+infile.suffix="_all_chrs_maf0.05.bed" # file name ending that recognises the .bed input files
+outfile.suffix="_svd.obj$u_10_gPCs_maf0.05.csv" # file name ending for the outfile
+
 # set up analysis loop
-for(cohort in c("BF", "PP", "PD")){
+for(cohort in c("PP", "PD")){ # , "BF" 
   
   print("----------------------")
   print(paste("Running analysis for cohort=", cohort))
@@ -17,7 +20,7 @@ for(cohort in c("BF", "PP", "PD")){
   ## 2. Load data
   
   # Get the example bedfile from package bigsnpr
-  bedfile <- paste0("./data/genomics_bed_bim_fam_from_rosalind/",cohort,"_all_chrs.bed")
+  bedfile <- paste0("./data/genomics_bed_bim_fam_from_rosalind/",cohort,infile.suffix)
   
   ## 3. Pre-prepare data
   
@@ -77,9 +80,9 @@ for(cohort in c("BF", "PP", "PD")){
   #    + To check that PCs are not capturing LD, you should check PCA loadings.
   svd0 <- snp_autoSVD(G, CHR, POS, thr.r2 = 0.2, k=10)
   
-  print("Saving image")
-  
-  save.image(file = paste0(data.out, cohort, "_bigsnpr_data.RData"))
+  # print("Saving image")
+  # 
+  # save.image(file = paste0(data.out, cohort, "_bigsnpr_data.RData"))
   
   ## 5. Export gPCs
   
@@ -91,7 +94,7 @@ for(cohort in c("BF", "PP", "PD")){
   svd0$u %>%
     as.data.frame() %>% 
     `rownames<-`(sample_ids) %>% 
-    readr::write_csv(x=., file=paste0(data.out, cohort, "_svd.obj$u_10_gPCs.csv"))
+    readr::write_csv(x=., file=paste0(data.out, cohort, outfile.suffix))
 
   print("----------------------")
   
