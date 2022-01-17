@@ -12,7 +12,7 @@ infile.suffix="_all_chrs_maf0.05.bed" # file name ending that recognises the .be
 outfile.suffix="_svd.obj$u_10_gPCs_maf0.05.csv" # file name ending for the outfile
 
 # set up analysis loop
-for(cohort in c("PP", "PD")){ # , "BF" 
+for(cohort in c("BF")){ # , 
   
   print("----------------------")
   print(paste("Running analysis for cohort=", cohort))
@@ -94,6 +94,7 @@ for(cohort in c("PP", "PD")){ # , "BF"
   svd0$u %>%
     as.data.frame() %>% 
     `rownames<-`(sample_ids) %>% 
+    tibble::rownames_to_column("sample_id") %>% 
     readr::write_csv(x=., file=paste0(data.out, cohort, outfile.suffix))
 
   print("----------------------")
