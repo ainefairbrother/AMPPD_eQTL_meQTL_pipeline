@@ -1,0 +1,6 @@
+# run on local computer to transfer files from ryten to rosalind for the purposes of running PEER 
+# this is because PEER is difficult to install and Alan has it installed on Rosalind
+
+# download ryten->local using filezilla, then transfer local->rosalind using the following command
+sshpass -p 'Poppeta1995AFB!!!!!' scp -i /Users/ainefairbrother/.ssh/id_rsa_rosalind /Users/ainefairbrother/Downloads/*all_timepoint_log10_mediannorm_TPM_wrangled.csv k1811990@login.rosalind.kcl.ac.uk:/scratch/groups/hodgkinsonlab/aine/data/amppd_log10mednorm
+

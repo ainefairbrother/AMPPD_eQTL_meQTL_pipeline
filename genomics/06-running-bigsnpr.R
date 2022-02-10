@@ -12,14 +12,14 @@ infile.suffix="_all_chrs_maf0.05.bed" # file name ending that recognises the .be
 outfile.suffix="_svd.obj$u_10_gPCs_maf0.05.csv" # file name ending for the outfile
 
 # set up analysis loop
-for(cohort in c("BF")){ # , 
+for(cohort in c("PP", "PD")){
   
   print("----------------------")
   print(paste("Running analysis for cohort=", cohort))
   
   ## 2. Load data
   
-  # Get the example bedfile from package bigsnpr
+  # Get the bedfile
   bedfile <- paste0("./data/genomics_bed_bim_fam_from_rosalind/",cohort,infile.suffix)
   
   ## 3. Pre-prepare data

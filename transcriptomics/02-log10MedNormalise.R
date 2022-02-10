@@ -22,28 +22,28 @@ log10MedNormalise = function(file_dir="", pattern=".csv", filesep=",", outlabel=
   
   # run all files in parallel - use n cores = n files
   num_cores = length(file_list)
-
+  
   # defining normalisation fn 
   doNormalisation = function(f){
-
+    
     file_name = gsub("__.*", "", f)
     
     print(file_name)
-
+    
     df = read.csv(file=paste0(file_dir, f), sep=filesep, row.names=1, header=T)
     
     # samples to cols
     if(length(colnames(df)) > length(rownames(df))){
       df = data.frame(t(df))
     }
-
+    
     print("loading df")
     print(dim(df))
     print(df[1:4,1:4])
     
     print("getting all NA in df")
     print(sum(is.na(df)))
-
+    
     # remove individuals that have zero reads
     print("removing individuals with 0 reads")
     test = apply(df, 2, function(x) { any(x > 0)})
@@ -69,7 +69,7 @@ log10MedNormalise = function(file_dir="", pattern=".csv", filesep=",", outlabel=
     pseudoCount = log10(df + 1)
     
     print("pseudoCount table: ")
-
+    
     print("writing outfiles")
     if(med_norm==TRUE){
       # median normalise with the "beadarray" module in R
