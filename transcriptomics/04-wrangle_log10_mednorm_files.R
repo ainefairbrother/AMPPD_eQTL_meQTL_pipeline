@@ -1,5 +1,6 @@
 # script that takes in log10 median normalised files (PP, PD, BF)
 # filters for sample lists - which filters for visit month, gets rid of "Other" diagnoses, and filters for cohort
+# prepares files for PEER
 
 ###### BF ###### 
 
@@ -68,12 +69,12 @@ process.timepoint.files = function(samples.list.file.path, log.10.med.norm.file.
     gsub("processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints", "PEER_input/all_timepoints", .)
   
   samples.to.use = read_csv(samples.list.file.path, show_col_types = FALSE) %>% 
-    dplyr::pull(x)
+    dplyr::pull(x) %>% 
+    lapply(X=., FUN=function(X){return(str_match(string=X, pattern="P.+-")[1] %>% gsub("-$", "", .))}) %>% 
+    unlist()
   
-  log.10.med.norm = read.csv(log.10.med.norm.file.path, header=F) 
-  new.colnames =  c("gene_id", log.10.med.norm[1,] %>% as.character()) %>% .[-length(.)]
-  colnames(log.10.med.norm) = new.colnames
-  
+  log.10.med.norm = vroom::vroom(log.10.med.norm.file.path) 
+
   log.10.med.norm = log.10.med.norm %>% 
     tidyr::drop_na() %>% 
     tibble::column_to_rownames("gene_id") %>% 
@@ -86,22 +87,22 @@ process.timepoint.files = function(samples.list.file.path, log.10.med.norm.file.
 }
 
 process.timepoint.files(samples.list.file.path="./data/AMPPD_sample_lists/PD-visit_month=ALL-case_control_other_latest!=Other_unique_1015.csv", 
-                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PD_cohort_all_timepoint_log10_mediannorm_TPM.csv"
+                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PD_cohort_timepoint_averaged_log10_mediannorm_TPM.csv"
                         )
 process.timepoint.files(samples.list.file.path="./data/AMPPD_sample_lists/PP-visit_month=ALL-case_control_other_latest!=Other_unique_1015.csv", 
-                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PP_cohort_all_timepoint_log10_mediannorm_TPM.csv"
+                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PP_cohort_timepoint_averaged_log10_mediannorm_TPM.csv"
 )
 process.timepoint.files(samples.list.file.path="./data/AMPPD_sample_lists/PD-visit_month=ALL-case_control_other_latest==Case_unique_1015.csv", 
-                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PD_case_all_timepoint_log10_mediannorm_TPM.csv"
+                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PD_case_timepoint_averaged_log10_mediannorm_TPM.csv"
 )
 process.timepoint.files(samples.list.file.path="./data/AMPPD_sample_lists/PD-visit_month=ALL-case_control_other_latest==Control_unique_1015.csv", 
-                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PD_ctrl_all_timepoint_log10_mediannorm_TPM.csv"
+                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PD_ctrl_timepoint_averaged_log10_mediannorm_TPM.csv"
 )
 process.timepoint.files(samples.list.file.path="./data/AMPPD_sample_lists/PP-visit_month=ALL-case_control_other_latest==Case_unique_1015.csv", 
-                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PP_case_all_timepoint_log10_mediannorm_TPM.csv"
+                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PP_case_timepoint_averaged_log10_mediannorm_TPM.csv"
 )
 process.timepoint.files(samples.list.file.path="./data/AMPPD_sample_lists/PP-visit_month=ALL-case_control_other_latest==Control_unique_1015.csv", 
-                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PP_ctrl_all_timepoint_log10_mediannorm_TPM.csv"
+                        log.10.med.norm.file.path="./data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/all_timepoints/PP_ctrl_timepoint_averaged_log10_mediannorm_TPM.csv"
 )
 
 
