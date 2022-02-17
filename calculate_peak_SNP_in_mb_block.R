@@ -1,8 +1,4 @@
 assign.mb.block.to.group = function(group){
-  
-  # group= d %>% 
-  #   slice_head(n=100)
-  
   # This function assigns, to a group of a df, block IDs, mb.block.id, to a cluster of row values
   # Rows are clustered based on the SNP position
   # Then the tree is cut to get positions that are within a series of megabase blocks
@@ -10,6 +6,7 @@ assign.mb.block.to.group = function(group){
   # It then determines the peak (min. p.value) SNP in the block 
   # The output is a modified group in tibble format 
   
+  # define block size (bases)
   block.size=1000000
   
   # get distance tree by calculating the complete distance between positions
@@ -52,22 +49,28 @@ apply.assign.mb.fn.to.file.and.write.out = function(file.path){
   print(file.path)
   
   d = vroom::vroom(file.path) %>% 
-    tidyr::extract(col=snp.chr.pos, into="snp.chr", regex="chr(.+):", remove=FALSE)
+    dplyr::select(-snp.chr) %>% 
+    tidyr::extract(col=snp.chr.pos, into="snp.chr", regex="(chr.+):", remove=FALSE)
   
   # if the df is not empty, continue with wrangling
   if(dim(d)[1]!=0){
-    
+
     # if the mb.block.id.chr is not present, continue with wrangling
     if( !("mb.block.id" %in% colnames(d)) ){
-      d %>% 
-        dplyr::group_by(snp.chr, phenotype, cohort, diagnosis, .drop=FALSE) %>%
-        dplyr::group_modify(~assign.mb.block.to.group(.x)) %>% 
-        dplyr::mutate(chr.mb.block.id=paste0(snp.chr,".",mb.block.id)) %>% 
+      d %>%
+        dplyr::mutate(snp.chr=factor(snp.chr), 
+                      phenotype=factor(phenotype), 
+                      cohort=factor(cohort),
+                      diagnosis=factor(diagnosis)) %>% 
+        dplyr::group_by(snp.chr, phenotype, cohort, diagnosis) %>%
+        # ensure group size is >=2, or there is nothing to cluster
+        dplyr::filter(n() >= 2) %>% 
+        dplyr::group_modify(~assign.mb.block.to.group(.x)) %>%
+        dplyr::mutate(chr.mb.block.id=paste0(snp.chr,".",mb.block.id)) %>%
         # group by snp.chr and mb.block.id in order to get 'peak snp' in MB block - aka SNP with lowest p.value
         dplyr::group_by(chr.mb.block.id, phenotype, cohort, diagnosis, .drop=FALSE) %>%
         dplyr::mutate(min.pval.in.mb.block=min(p.value)) %>%
-        dplyr::ungroup() %>% 
-        # dplyr::arrange(.by_group = TRUE) %>%
+        dplyr::ungroup() %>%
         vroom::vroom_write(x=., file=file.path)
     }
   }

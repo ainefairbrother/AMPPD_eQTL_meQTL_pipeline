@@ -5,10 +5,11 @@
 #### -------------- prepare env -------------- ####
 
 # conda activate r4-base
+# cd /home/abrowne/projects/amppd_analysis/pipeline/
 
 # conda install -c conda-forge r-stringi
 # conda install -c conda-forge r-tzdb
-# conda install -c r r-tidyverse
+# conda install -c r r-tidyversecd
 
 #### -------------- load libs -------------- ####
 library(dplyr)
@@ -42,7 +43,7 @@ read.matrixeqtl.pheno.output.wrangle.write = function(path, pattern){
     #if(file.exists(gsub("MatrixEQTL", "wrangled", X))==FALSE){
     
     # extract relevant info from file name
-    extracted.groups = stringi::stri_match_all(X, regex="^([A-Z]{2})_([A-Za-z]+)_pheno=(.+)_maf=(.+)_phenotype=([A-Za-z]+)_model=([A-Za-z]+)_MatrixEQTL.csv")[[1]]
+    extracted.groups = stringi::stri_match_all(X, regex="(.+)_([A-Za-z]+)_pheno=(.+)_maf=(.+)_phenotype=([A-Za-z]+)_model=([A-Za-z]+)_MatrixEQTL.csv")[[1]]
     
     # read in and wrangle - add file name info as columns 
     vroom::vroom(file=X, delim = "\t", escape_double = FALSE, trim_ws = TRUE) %>% 
@@ -76,7 +77,7 @@ read.matrixeqtl.pheno.output.wrangle.write = function(path, pattern){
   parallel::mclapply(file.list, wrangle.write.file, mc.cores=4)
 }
 
-read.annot.file.apply.filter = function(file.path, p.cutoff=1e-03){
+read.annot.file.apply.filter = function(file.path){
   
   d = vroom::vroom(file.path) 
   
@@ -87,7 +88,7 @@ read.annot.file.apply.filter = function(file.path, p.cutoff=1e-03){
                     nearestGene.bioType=NA)
   }
   d %>%
-    dplyr::filter(p.value<p.cutoff) %>%
+    dplyr::filter(p.value<1e-03) %>%
     # make snp col a number
     dplyr::mutate(snp.chr=as.numeric(snp.chr)) %>% 
     return(.)
@@ -111,19 +112,30 @@ lapply.helper = function(fn, path, pattern){
 #                                            pattern="MatrixEQTL.csv")
 
 ## implement read.annot.file.apply.filter on wrangled raw files, collate into aggregated table and write out
-lapply.helper(fn=read.annot.file.apply.filter, path="./data/MatrixEQTL_output", pattern="_wrangled.csv", p.cutoff=1e-03) %>% 
+# lapply.helper(fn=read.annot.file.apply.filter, path="./data/MatrixEQTL_output", pattern="_wrangled.csv", p.cutoff=1e-03) %>%
+#   # then filter list of files and bind them together
+#   .[lapply(., length) > 0] %>%
+#   .[map(., ~dim(.)[1]) > 0] %>%
+#   dplyr::bind_rows() %>%
+#   # remove extra cols
+#   dplyr::select(-(ends_with(".x"))) %>%
+#   dplyr::select(-(ends_with(".y"))) %>%
+#   dplyr::select(-contains("nearestGene")) %>%
+#   readr::write_csv(x=., file="./data/MatrixEQTL_output/aggregated_tables/matrixeqtl_res_aggregated_p1e-03_filter.csv")
+
+# run for mega
+read.matrixeqtl.pheno.output.wrangle.write(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/PP_PD_mega_analysis/",
+                                           pattern="MatrixEQTL.csv")
+lapply.helper(fn=read.annot.file.apply.filter, path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/PP_PD_mega_analysis/", pattern="_wrangled.csv") %>%
   # then filter list of files and bind them together
-  .[lapply(., length) > 0] %>% 
-  .[map(., ~dim(.)[1]) > 0] %>% 
-  dplyr::bind_rows() %>% 
-  # remove extra cols 
-  dplyr::select(-(ends_with(".x"))) %>% 
-  dplyr::select(-(ends_with(".y"))) %>% 
-  dplyr::select(-contains("nearestGene")) %>% 
-  readr::write_csv(x=., file="./data/MatrixEQTL_output/aggregated_tables/matrixeqtl_res_aggregated_p1e-03_filter.csv")
-
-
-
+  .[lapply(., length) > 0] %>%
+  .[map(., ~dim(.)[1]) > 0] %>%
+  dplyr::bind_rows() %>%
+  # remove extra cols
+  dplyr::select(-(ends_with(".x"))) %>%
+  dplyr::select(-(ends_with(".y"))) %>%
+  dplyr::select(-contains("nearestGene")) %>%
+  readr::write_csv(x=., file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/PP_PD_mega_analysis/aggregated_tables/matrixeqtl_mega_res_aggregated_p1e-03_filter.csv")
 
 
 

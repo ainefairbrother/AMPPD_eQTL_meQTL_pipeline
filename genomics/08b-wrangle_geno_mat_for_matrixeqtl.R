@@ -2,7 +2,7 @@
 
 # import libs
 require(data.table)
-require(tidyverse)
+require(dplyr)
 
 wrangle.geno.mat.for.MatrixEQTL = function(pos.file, geno.matrix.file, sample.id.file, out.file){
   
@@ -56,8 +56,40 @@ wrangle.geno.mat.for.MatrixEQTL = function(pos.file, geno.matrix.file, sample.id
   
 }
 
-for(cohort in c("PD", "PP", "BF")){
-base.dir="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/"
+# for(cohort in c("PD", "PP", "BF")){
+# base.dir="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/"
+#   for(diag in c("case", "control")){
+# 
+#     if(diag=="case"){diag.sample="Case"}
+#     if(diag=="control"){diag.sample="Control"}
+# 
+#     wrangle.geno.mat.for.MatrixEQTL(
+#       pos.file = paste0(base.dir,cohort,"_all_chrs-maf0.05_geno_matrix.012.pos"),
+#       geno.matrix.file = paste0(base.dir,cohort,"_",diag.sample,"_all_chrs-maf0.05_geno_matrix_012_wrangled.csv"),
+#       sample.id.file = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/",cohort,"_",diag.sample,"_reduce_intersect_gpc_peer_meta_sampleid.csv"),
+#       out.file = paste0(base.dir,cohort,"_",diag,"_all_chrs-maf0.05_geno_matrix_012_wrangled-8b.csv")
+#     )
+# 
+#   }
+# }
+# 
+# for(cohort in c("PD", "PP", "BF")){
+# 
+#   base.dir="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/"
+# 
+#   wrangle.geno.mat.for.MatrixEQTL(
+#     pos.file = paste0(base.dir,cohort,"_all_chrs-maf0.05_geno_matrix.012.pos"),
+#     geno.matrix.file = paste0(base.dir,cohort,"_cohort_all_chrs-maf0.05_geno_matrix_012_wrangled.csv"),
+#     sample.id.file = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/",cohort,"_cohort_reduce_intersect_gpc_peer_meta_sampleid.csv"),
+#     out.file = paste0(base.dir,cohort,"_all_chrs-0.05_geno_matrix_012_wrangled-8b.csv")
+#   )
+# }
+
+### wrangling for timepoint analysis
+for(cohort in c("PD", "PP")){
+
+  base.dir="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/"
+
   for(diag in c("case", "control")){
 
     if(diag=="case"){diag.sample="Case"}
@@ -66,22 +98,23 @@ base.dir="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/"
     wrangle.geno.mat.for.MatrixEQTL(
       pos.file = paste0(base.dir,cohort,"_all_chrs-maf0.05_geno_matrix.012.pos"),
       geno.matrix.file = paste0(base.dir,cohort,"_",diag.sample,"_all_chrs-maf0.05_geno_matrix_012_wrangled.csv"),
-      sample.id.file = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/",cohort,"_",diag.sample,"_reduce_intersect_gpc_peer_meta_sampleid.csv"),
-      out.file = paste0(base.dir,cohort,"_",diag,"_all_chrs-maf0.05_geno_matrix_012_wrangled-8b.csv")
+      sample.id.file = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/all_timepoints/",cohort,"_",diag.sample,"_averaged_timepoint_reduce_intersect_gpc_peer_meta_sampleid.csv"),
+      out.file = paste0(base.dir,"all_timepoints/",cohort,"_",diag,"_all_chrs-maf0.05_geno_matrix_012_wrangled-8b.csv")
     )
 
   }
 }
 
-for(cohort in c("PD", "PP", "BF")){
-
+for(cohort in c("PD", "PP")){
+  
   base.dir="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/"
-
+  
   wrangle.geno.mat.for.MatrixEQTL(
     pos.file = paste0(base.dir,cohort,"_all_chrs-maf0.05_geno_matrix.012.pos"),
     geno.matrix.file = paste0(base.dir,cohort,"_cohort_all_chrs-maf0.05_geno_matrix_012_wrangled.csv"),
-    sample.id.file = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/",cohort,"_cohort_reduce_intersect_gpc_peer_meta_sampleid.csv"),
-    out.file = paste0(base.dir,cohort,"_all_chrs-0.05_geno_matrix_012_wrangled-8b.csv")
+    sample.id.file = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/all_timepoints/",cohort,"_cohort_averaged_timepoint_reduce_intersect_gpc_peer_meta_sampleid.csv"),
+    out.file = paste0(base.dir,"all_timepoints/",cohort,"_all_chrs-0.05_geno_matrix_012_wrangled-8b.csv")
   )
 }
+
 
