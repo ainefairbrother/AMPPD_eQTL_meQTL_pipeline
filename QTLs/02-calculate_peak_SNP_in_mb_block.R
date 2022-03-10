@@ -1,3 +1,21 @@
+#!/usr/bin/env Rscript
+
+# wrangling raw matrixeqtl output, preparing it for downstream 
+
+#### -------------- prepare env -------------- ####
+
+# conda activate r4-base
+# cd ~/projects/amppd_analysis/pipeline/eqtls_mqtls
+# Rscript 02-calculate_peak_SNP_in_mb_block.R
+
+#### -------------- load libs -------------- ####
+
+library(dplyr)
+library(vroom)
+library(parallel)
+
+#### -------------- define functions -------------- ####
+
 assign.mb.block.to.group = function(group){
   # This function assigns, to a group of a df, block IDs, mb.block.id, to a cluster of row values
   # Rows are clustered based on the SNP position
@@ -17,6 +35,7 @@ assign.mb.block.to.group = function(group){
   blocks = split(group$snp.start, stats::cutree(tree, h = block.size)) %>%
     `names<-`(paste0("block",names(.)))
   
+  #######################################################
   # check that the block range is less than 1mb - for each block
   error.count=0
   for(i in 1:length(blocks)){
@@ -24,10 +43,9 @@ assign.mb.block.to.group = function(group){
     if(le.1mb==FALSE){error.count=error.count+1}
   }
   if(error.count != 0){print(error.count)}
-  
   #######################################################
   
-  # split distance tree into 1MB clusters 
+  # split distance tree into 1MB clusters, label the clusters and write out
   return(
     split(group$snp.start, cutree(tree, h=block.size)) %>% 
       # name the clusters
@@ -48,22 +66,22 @@ apply.assign.mb.fn.to.file.and.write.out = function(file.path){
   
   print(file.path)
   
-  d = vroom::vroom(file.path) %>% 
-    dplyr::select(-snp.chr) %>% 
-    tidyr::extract(col=snp.chr.pos, into="snp.chr", regex="(chr.+):", remove=FALSE)
+  cn = vroom::vroom(file.path) %>% colnames(., show_col_types = FALSE)
   
-  # if the df is not empty, continue with wrangling
-  if(dim(d)[1]!=0){
-
-    # if the mb.block.id.chr is not present, continue with wrangling
-    if( !("mb.block.id" %in% colnames(d)) ){
-      d %>%
+  # if the file is not empty, continue with wrangling
+  if(readLines(paste0(file.path))!=""){
+    
+    # # if the mb.block.id.chr is not present, continue with wrangling
+    if( !("mb.block.id" %in% cn) ){
+      vroom::vroom(file.path, show_col_types = FALSE) %>% 
+        dplyr::select(-snp.chr) %>% 
+        tidyr::extract(col=snp.chr.pos, into="snp.chr", regex="(chr.+):", remove=FALSE) %>%
         dplyr::mutate(snp.chr=factor(snp.chr), 
                       phenotype=factor(phenotype), 
                       cohort=factor(cohort),
                       diagnosis=factor(diagnosis)) %>% 
         dplyr::group_by(snp.chr, phenotype, cohort, diagnosis) %>%
-        # ensure group size is >=2, or there is nothing to cluster
+        # ensure group size is >=2, or there is nothing to cluster, this also filters out lone hits without towers
         dplyr::filter(n() >= 2) %>% 
         dplyr::group_modify(~assign.mb.block.to.group(.x)) %>%
         dplyr::mutate(chr.mb.block.id=paste0(snp.chr,".",mb.block.id)) %>%
@@ -75,6 +93,7 @@ apply.assign.mb.fn.to.file.and.write.out = function(file.path){
     }
   }
 }
+
 parallel.helper = function(fn, path, pattern, cores.to.use=3){
   
   # Run a function, fn, across files matching pattern, pattern, in directory, path. 
@@ -91,3 +110,24 @@ lapply.helper = function(fn, path, pattern){
   lapply(X=file.list, FUN=fn)
   
 }
+
+#### -------------- implement functions -------------- ####
+
+# # run for average timepoint analysis
+# parallel.helper(fn=apply.assign.mb.fn.to.file.and.write.out, 
+#                 path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/all_timepoints/", 
+#                 pattern="wrangled.csv", 
+#                 cores.to.use=6)
+
+# # # run for individual cohort analysis
+# parallel.helper(fn=apply.assign.mb.fn.to.file.and.write.out,
+#                 path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/",
+#                 pattern="wrangled.csv",
+#                 cores.to.use=3)
+
+# run for mega analysis
+parallel.helper(fn=apply.assign.mb.fn.to.file.and.write.out,
+                path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/PP_PD_mega_analysis",
+                pattern="wrangled.csv",
+                cores.to.use=4)
+

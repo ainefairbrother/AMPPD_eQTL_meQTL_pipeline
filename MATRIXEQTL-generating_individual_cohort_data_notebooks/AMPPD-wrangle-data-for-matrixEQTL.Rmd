@@ -1,0 +1,509 @@
+---
+title: "Wrangling data for input into `MatrixEQTL`"
+author: "Aine Fairbrother-Browne"
+date: "11/21"
+output: 
+  html_document:
+    theme: paper
+    highlight: kate
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: false  
+    fig_width: 20
+    fig_height: 15
+    fig_caption: true
+---
+
+
+**Aim**: To wrangle covariate, transcriptomic and methylation data into the correct format for input into `MatrixEQTL`   
+
+# Setup  
+
+```{r setup, include=FALSE}
+
+# import libs
+library(tidyverse)
+library(vroom)
+library(EnsDb.Hsapiens.v79)
+
+# notebook settings 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/home/abrowne/projects/amppd_analysis/")
+
+```
+
+# Covariates  
+
+* This input to `MatrixEQTL` will consist of a single file containing sample metadata, PEER factors and gPCs   
+* The format will be as such: rows=variables, cols=samples  
+
+## Metadata    
+
+* The function `wrangle.filter.export.meta()` does the following:  
++ Filter for cohort  
++ Filter for diagnosis  
++ Filter for release `1015` samples  
++ Select only the `sample_id`, `age` and `sex` variables  
++ Encode `sex`: Female ~ 0, Male ~ 1  
++ Transpose --> rows=meta, cols=samples   
+
+```{r}
+
+meta = readr::read_csv("./metadata/2020_v2release_1218/filtered/amppd-meta-cc-demo-rnaseq-medhist-variable-missing-n=25-filt.csv", show_col_types = FALSE)
+
+meta %>% 
+  dplyr::group_by(cohort) %>% 
+  dplyr::summarise(n=n())
+
+```
+
+```{r}
+
+wrangle.filter.export.meta = function(cohort, diag){
+  
+  print(paste(cohort, diag))
+  
+  if(diag != "cohort"){
+    
+    samples.file = read_csv(paste0("./data/AMPPD_sample_lists/",cohort,"-visit_month=0-case_control_other_latest==",diag,"_unique_1015.csv"), show_col_types = FALSE) %>% 
+      dplyr::pull(x)
+    
+    meta = readr::read_csv("./metadata/2020_v2release_1218/filtered/amppd-meta-cc-demo-rnaseq-medhist-variable-missing-n=25-filt.csv", show_col_types = FALSE) %>% 
+      dplyr::filter(cohort==cohort) %>% 
+      dplyr::filter(case_control_other_latest==diag) %>% 
+      dplyr::select(sample_id, sex, age_at_baseline) %>% 
+      dplyr::filter(sample_id %in% samples.file) %>% 
+      dplyr::distinct() %>% 
+      dplyr::mutate(sex=case_when(
+        sex=="Male" ~ 0,
+        sex=="Female" ~ 1
+      )) %>% 
+      tibble::column_to_rownames("sample_id") %>% 
+      t() %>% 
+      as.data.frame() %>% 
+      tibble::rownames_to_column("variable")
+    
+    meta %>% dim() %>% print()
+    
+    meta %>% 
+      readr::write_csv(x=., file=paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_meta_age_sex_for_MatrixEQTL.csv"))
+  }
+  
+  if(diag == "cohort"){
+    
+    samples.file = read_csv(paste0("./data/AMPPD_sample_lists/",cohort,"-visit_month=0-case_control_other_latest!=Other_unique_1015.csv"), show_col_types = FALSE) %>% 
+      dplyr::pull(x)
+    
+    meta = readr::read_csv("./metadata/2020_v2release_1218/filtered/amppd-meta-cc-demo-rnaseq-medhist-variable-missing-n=25-filt.csv", show_col_types = FALSE) %>% 
+      dplyr::filter(cohort==cohort) %>% 
+      dplyr::select(sample_id, sex, age_at_baseline, case_control_other_latest) %>% 
+      dplyr::filter(sample_id %in% samples.file) %>% 
+      dplyr::distinct() %>% 
+      dplyr::mutate(
+        
+        sex=case_when(
+          sex=="Male" ~ 0,
+          sex=="Female" ~ 1
+        ),
+        case_control_other_latest=case_when(
+          case_control_other_latest=="Case" ~ 1,
+          case_control_other_latest=="Control" ~ 0 
+        )
+        
+      ) %>% 
+      tibble::column_to_rownames("sample_id") %>% 
+      t() %>% 
+      as.data.frame() %>% 
+      tibble::rownames_to_column("variable")
+    
+    meta %>% dim() %>% print()
+    
+    meta %>% 
+      readr::write_csv(x=., file=paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_meta_age_sex_for_MatrixEQTL.csv"))
+  }
+}
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+for(cohort in c("BF","PP","PD")){
+  for(diag in c("Case", "Control", "cohort")){
+    wrangle.filter.export.meta(cohort=cohort, diag=diag)
+  }
+}
+
+```
+
+## PEER factors  
+
+* The function `wrangle.filter.export.peer.matrices()` does the following:  
++ Import  
++ Filter for release `1015` samples  
++ Re-label PEER factors so it's clear what they are in the later merged cov. file  
++ Select only the first 10 PEER factors  
++ Transpose --> rows=factors, cols=samples   
+
+```{r message=FALSE, warning=FALSE}
+
+wrangle.filter.export.peer.matrices = function(fname){
+  
+  basename=gsub("_PEER_wrangled.csv", "", fname)
+  cohort=stringr::str_extract(basename, "^.{2}")
+  diag=gsub(cohort, "", basename) %>% gsub("_", "", .)
+  
+  print(paste(cohort, diag))
+  
+  # read in relevant sample_id list
+  if(diag == "cohort"){
+    new.diag="cohort"
+    samples.file = read_csv(paste0("./data/AMPPD_sample_lists/",cohort,"-visit_month=0-case_control_other_latest!=Other_unique_1015.csv"), show_col_types = FALSE) %>% 
+      dplyr::pull(x)
+  }
+  if(diag == "case"){
+    new.diag="Case"
+    samples.file = read_csv(paste0("./data/AMPPD_sample_lists/",cohort,"-visit_month=0-case_control_other_latest==Case_unique_1015.csv"), show_col_types = FALSE) %>% 
+      dplyr::pull(x)
+  }
+  if(diag == "ctrl"){
+    new.diag="Control"
+    samples.file = read_csv(paste0("./data/AMPPD_sample_lists/",cohort,"-visit_month=0-case_control_other_latest==Control_unique_1015.csv"), show_col_types = FALSE) %>% 
+      dplyr::pull(x)
+  }
+  
+  # read in relevant peer file
+  peer.file = readr::read_csv(paste0("./data/PEER_output/rosalind-cmd-line-gen/",fname), show_col_types = FALSE) %>% 
+    tibble::column_to_rownames("...1") %>%
+    `colnames<-`(gsub("V", "PEER", colnames(.))) %>% # relabel so it's clear they're PEER factors
+    dplyr::select(1:10) %>% # get first 10 PEER factors
+    t(.) %>% # transpose
+    as.data.frame(.) %>% 
+    tibble::rownames_to_column("variable")
+  
+  # peer.file %>% dim() %>% print()
+  # peer.file %>% .[1:5,1:5] %>% print()
+  
+  peer.file %>% 
+    readr::write_csv(x=., file=paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",new.diag,"_10_PEER_for_MatrixEQTL.csv"))
+  
+}
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+peer.files=c("BF_cohort_PEER_wrangled.csv", "BF_case_PEER_wrangled.csv", "BF_ctrl_PEER_wrangled.csv", "PP_cohort_PEER_wrangled.csv", "PP_case_PEER_wrangled.csv", "PP_ctrl_PEER_wrangled.csv", "PD_cohort_PEER_wrangled.csv", "PD_case_PEER_wrangled.csv", "PD_ctrl_PEER_wrangled.csv")
+
+for(i in peer.files){
+  wrangle.filter.export.peer.matrices(fname=i)
+}
+
+```
+
+## gPCs  
+
+* The function `wrangle.filter.export.gpcs` does the following:  
++ Read in gPC files - currently cohort-level  
++ Split to cohort-diagnosis   
++ Transpose --> rows=factors, cols=samples   
+
+```{r}
+
+wrangle.filter.export.gpcs = function(cohort, diag){
+  
+  print(paste(cohort, diag))
+  
+  gpc.file = read.csv(paste0("./data/bigsnpr_gPC_output/",cohort,"_svd.obj$u_10_gPCs_maf0.05.csv")) %>% 
+    tibble::column_to_rownames("sample_id") %>% 
+    `colnames<-`(gsub("V", "gPC", colnames(.))) %>% # relabel so it's clear they're PEER factors
+    as.data.frame(.) 
+  
+  if(diag == "Case"){
+    samples.file = read_csv(paste0("./data/AMPPD_sample_lists/",cohort,"-visit_month=0-case_control_other_latest==",diag,"_unique_1015.csv"), show_col_types = FALSE) %>% 
+      dplyr::pull(x)
+  }
+  if(diag == "Control"){
+    samples.file = read_csv(paste0("./data/AMPPD_sample_lists/",cohort,"-visit_month=0-case_control_other_latest==",diag,"_unique_1015.csv"), show_col_types = FALSE) %>% 
+      dplyr::pull(x)
+  }
+  if(diag == "cohort"){
+    samples.file = read_csv(paste0("./data/AMPPD_sample_lists/",cohort,"-visit_month=0-case_control_other_latest!=Other_unique_1015.csv"), show_col_types = FALSE) %>% 
+      dplyr::pull(x)
+  }
+  
+  # in the bigsnpr function, participant_id are assigned because this is present in the bed file, so add appropriate smample_id suffix to match the metadata and transcriptomic data
+  if(cohort=="BF"){sample.id.suffix="-SVM0_5T1"}
+  if(cohort=="PP"){sample.id.suffix="-BLM0T1"}
+  if(cohort=="PD"){sample.id.suffix="-BLM0T1"}
+  
+  gpc.file.diag = gpc.file %>% 
+    tibble::rownames_to_column("sample_id") %>% 
+    dplyr::mutate(sample_id=paste0(sample_id, sample.id.suffix)) %>% 
+    dplyr::filter(sample_id %in% samples.file) %>% 
+    tibble::column_to_rownames("sample_id") %>% 
+    dplyr::select(gPC1, gPC2, gPC3, gPC4, gPC5) %>%  # select first 5 gPCs only
+    t() %>% 
+    as.data.frame() %>% 
+    tibble::rownames_to_column("variable")
+  
+  gpc.file.diag %>% 
+    dim() %>% 
+    print()
+  
+  gpc.file.diag %>% 
+    readr::write_csv(x=., file=paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_5_gPCs_maf0.05_for_MatrixEQTL.csv"))
+  
+}
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+for(cohort in c("BF","PP","PD")){
+  for(diag in c("Case", "Control", "cohort")){
+    wrangle.filter.export.gpcs(cohort=cohort, diag=diag)
+  }
+}
+
+```
+
+## Collect and combine covariate files (meta, PEER, gPC) into single covariate file  
+
+* Need to generate 8 files, containing gPCs, metadata and PEER factors  
+* For: PD, BF and PP, PD-case, PD-control, PP-case, PP-control, BF-case, BF-control  
+* For this, need to get the set of sample which has genotyping data, has age and sex metadata and has trasncriptomic data (PEER carried out using TPM matrices)  
+* Then produce the final covariate table  
+
+```{r}
+
+generate.covariate.file = function(cohort, diag, data.type){
+  
+  print(paste(cohort, diag))
+  
+  gpc.file = readr::read_csv(paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_5_gPCs_maf0.05_for_MatrixEQTL.csv"), show_col_types = FALSE) %>% 
+    tibble::column_to_rownames("variable")
+  
+  peer.file = readr::read_csv(paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_10_PEER_for_MatrixEQTL.csv"), show_col_types = FALSE) %>% 
+    tibble::column_to_rownames("variable")
+  
+  meta.file = readr::read_csv(paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_meta_age_sex_for_MatrixEQTL.csv"), show_col_types = FALSE) %>%
+    tibble::column_to_rownames("variable")
+  
+  print(paste(
+  "gpc n = ",
+  gpc.file %>% colnames() %>% unique() %>% length(),
+  "peer n = ",
+  peer.file %>% colnames() %>% unique() %>% length(),
+  "meta n = ",
+  meta.file %>% colnames() %>% unique() %>% length()
+  ))
+  
+  sample.set = Reduce(intersect, list(
+    gpc.file %>% colnames() %>% unique(),
+    peer.file %>% colnames() %>% unique(),
+    meta.file %>% colnames() %>% unique()
+  ))
+  
+  print(paste(
+  "sample set n = ",  
+  sample.set %>% length()
+  ))
+  
+  # write out sample.set
+  sample.set %>% 
+    as.data.frame() %>% 
+    readr::write_csv(x=., file=paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_reduce_intersect_gpc_peer_meta_sampleid.csv"))
+  
+  gpc.file = gpc.file %>%
+    .[sample.set]
+
+  gpc.file %>%
+    .[1:5,1:5]
+
+  peer.file = peer.file %>%
+    .[sample.set]
+
+  peer.file %>%
+    .[1:5,1:5]
+
+  meta.file = meta.file %>%
+    .[sample.set]
+
+  meta.file %>%
+    .[,1:5]
+
+  # meta mist be last so that case_control_other_latest is the 'last' covariate
+  all.covs = dplyr::bind_rows(gpc.file,
+                              peer.file,
+                              meta.file) %>%
+    tibble::rownames_to_column("variable")
+
+  all.covs %>%
+    readr::write_csv(x=., file=paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_maf0.05_cov_table_for_MatrixEQTL.csv"))
+
+  all.covs %>%
+    dim() %>%
+    print()
+  
+}
+```
+
+```{r}
+
+for(cohort in c("BF","PP","PD")){
+  for(diag in c("Case", "Control", "cohort")){
+    generate.covariate.file(cohort=cohort, diag=diag)
+  }
+}
+
+for(cohort in c("PP","PD")){
+  for(diag in c("Case", "Control")){
+    generate.covariate.file(cohort=cohort, diag=diag)
+  }
+}
+
+```
+
+# Transcriptomics  
+
+* These files need to have the same sample set as the meta/genomic data  
+* They need to have MT genes only, as we're looking at associating mito expression with nuclear variation  
+* They also need to be transposed, cols=samples  
+
+```{r}
+
+# get mito gene list
+
+# Convert from gene.symbol to ensembl.gene
+mt.gene.sym = c("MT-ND1","MT-ND2","MT-ND3","MT-ND4L","MT-ND4","MT-ND5","MT-ND6","MT-CO2","MT-CO3","MT-ATP8","MT-CYB","MT-CO1","MT-ATP6","MT-RNR1","MT-RNR2")
+
+mt.gene.ens = ensembldb::select(EnsDb.Hsapiens.v79, keys=mt.gene.sym, keytype = "SYMBOL", columns = c("SYMBOL","GENEID")) %>% 
+  dplyr::pull(GENEID)
+
+```
+
+```{r}
+
+wrangle.filter.export.transcriptomics = function(cohort, diag){
+  
+  print(paste(cohort, diag))
+  
+  samples.to.use = readr::read_csv(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_reduce_intersect_gpc_peer_meta_sampleid.csv"), show_col_types = FALSE) %>% 
+    dplyr::pull('.')
+  
+  tpm = vroom(paste0("/home/abrowne/projects/amppd_analysis/data/mt_nuc_corr_pipeline_output/",cohort,"_log10_mediannorm_TPM_masked_outliers_q1-3iqr_q3+3iqr.csv"), show_col_types = FALSE) %>%
+    dplyr::filter(sample_id %in% samples.to.use) %>% 
+    dplyr::arrange(match(sample_id, samples.to.use)) %>% 
+    tibble::column_to_rownames("sample_id") %>% 
+    t() %>% 
+    as.data.frame() %>% 
+    # make gene names non-version
+    `rownames<-`(gsub("\\..*", "", rownames(.))) %>% 
+    # filter for MT genes only
+    .[mt.gene.ens,] %>% 
+    tibble::rownames_to_column("sample_id") %>% 
+    readr::write_csv(x=., file=paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/",cohort,"_",diag,"_log10_mediannorm_TPM_masked_outliers_q1-3iqr_q3+3iqr_MT_ONLY.csv"))
+  
+}
+
+```
+
+```{r}
+
+for(cohort in c("PP","PD","BF")){
+  for(diag in c("Case", "Control", "cohort")){
+    wrangle.filter.export.transcriptomics(cohort=cohort, diag=diag)
+  }
+}
+
+```
+
+# Methylomics
+
+```{r}
+
+wrangle.filter.export.methylomics = function(cohort, diag){
+  
+  samples.to.use = readr::read_csv(paste0("./data/MatrixEQTL_input/covariates/",cohort,"_",diag,"_reduce_intersect_gpc_peer_meta_sampleid.csv"), show_col_types = FALSE) %>% 
+    dplyr::pull('.')
+  
+  meth = readr::read_csv(paste0("~/projects/amppd_analysis/data/methylation_data/",cohort,"_methylation_matrix.csv"), show_col_types = FALSE) %>% 
+    dplyr::mutate(across(everything(), ~na_if(., 1))) %>%  # ensure that 1s are masked as NAs
+    tidyr::pivot_longer(2:ncol(.), names_to="MT_pos", values_to="value") %>% 
+    dplyr::group_by(MT_pos) %>% 
+    
+    # treat the dataset carefully, as a harsh outlier approach doesn't work for this highly skewed dataset, but need to remove extreme values
+    dplyr::mutate(q1=quantile(value, 0.25, na.rm=T),
+                  q3=quantile(value, 0.75, na.rm=T)) %>%
+    dplyr::mutate(iqr=q3-q1) %>%
+    dplyr::mutate(iqr10=(q3-q1)*10) %>% # use *10iqr rather than the standard *3iqr due to the skewness of the dataset - highly skewed to 0
+    dplyr::mutate(outlier.low=q1-iqr10,
+                  outlier.high=q3+iqr10) %>%
+  # Identify outliers - only assess for outliers when q1 and q3 are not 0, otherwise false outliers get removed 
+    dplyr::mutate(is.outlier = case_when(
+      (value > outlier.high) & (q1>0 | q3>0) ~ TRUE,
+      (value < outlier.low) & (q1>0 | q3>0) ~ TRUE)) %>% 
+    dplyr::ungroup() %>% 
+    # mask outliers
+    dplyr::mutate(is.outlier = case_when(
+      is.na(is.outlier)==T ~ "FALSE", # not an outlier when there's an NA in the is.outlier col
+      is.na(is.outlier)==F ~ "TRUE" # is an outlier when there is a value (which will be TRUE) in the is.outlier col
+    )) %>% 
+    dplyr::mutate(value = ifelse(is.outlier=="TRUE", NA, value)) %>% 
+    
+    # back to original format
+    dplyr::select(-c("q1","q3","iqr","iqr10","outlier.low","outlier.high","is.outlier")) %>% 
+    tidyr::pivot_wider(id_cols="sample_id", values_from="value", names_from="MT_pos") %>% 
+    
+    # filter for the samples we can use
+    dplyr::filter(sample_id %in% samples.to.use) %>% 
+    dplyr::arrange(match(sample_id, samples.to.use)) %>% 
+    tibble::column_to_rownames("sample_id") %>% 
+    t() %>% 
+    as.data.frame() %>% 
+    tibble::rownames_to_column("sample_id") %>% 
+
+    readr::write_csv(x=., file=paste0("./data/MatrixEQTL_input/methylomics/",cohort,"_",diag,"_methylation_matrix_MatrixEQTL_input.csv"))
+  
+}
+
+```
+
+```{r}
+
+for(cohort in c("BF","PP","PD")){
+  for(diag in c("Case", "Control", "cohort")){
+    wrangle.filter.export.methylomics(cohort=cohort, diag=diag)
+  }
+}
+
+```
+
+# Split files into individual pheno files  
+
+* This is to allow per-phenotype running of `MatrixEQTL`  
+
+```{r message=FALSE, warning=FALSE}
+
+source("/home/abrowne/projects/amppd_analysis/pipeline/prepare_indv_pheno_files_for_MatrixEQTL.R")
+
+# implement function for transcriptomic data
+prepare.indv.pheno.files.for.MatrixEQTL(file.path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics",
+                                        file.pattern="MT_ONLY",
+                                        loc.for.pheno.name.in.outfile="log10")
+
+# implement function for methylation data
+prepare.indv.pheno.files.for.MatrixEQTL(file.path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics",
+                                        file.pattern="methylation_matrix",
+                                        loc.for.pheno.name.in.outfile="methylation")
+
+```
+
+# Session Info  
+
+```{r}
+sessionInfo()
+```
+

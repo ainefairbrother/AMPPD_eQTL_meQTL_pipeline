@@ -1,0 +1,257 @@
+---
+title: ""
+author: "Aine Fairbrother-Browne"
+date: ""
+output: 
+  html_document:
+    theme: paper
+    highlight: kate
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: false  
+    fig_width: 20
+    fig_height: 15
+    fig_caption: true
+---
+
+**Aim**: To test how transcriptomic data processing affects numbers of significant matrixeqtl results. I will test two scenarios using just PP control data:  
+* PP_Control log10 TPM files >> filter for MT genes >> mask outliers  
+* PP_Control log10 TPM files >> filter for MT genes >> median normalise >> masked outliers  
+
+I will then compare the numbers of P<5e-08 hits between these these methods, and the original method which follows this pipeline:  
+* PP_Control log10 TPM files >> median normalise >> mask outliers >> filter for MT genes  
+
+# Setup  
+
+```{r setup, include=FALSE}
+
+# import libs
+library(tidyverse)
+library(EnsDb.Hsapiens.v79)
+library(vroom)
+
+# notebook settings 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/home/abrowne/projects/amppd_analysis/")
+
+```
+
+# Data processing  
+
+## PP_Control log10 TPM files >> filter for MT genes >> mask outliers  
+
+Pipeline: 
+1. Take in PP control log10 normalised TPM file from [here](~/projects/amppd_analysis/data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/PP_ctrl_log10_norm_TPM.csv)  
+2. Filter for MT genes  
+3. Filter for samples I will use in final analysis  
+4. Write out  
+5. Mask outliers  
+6. Write out  
+
+* Read in PP_ctrl_log10_norm_TPM.csv  
+
+```{r message=FALSE, warning=FALSE}
+
+pp.tpm = readr::read_csv("~/projects/amppd_analysis/data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/PP_ctrl_log10_norm_TPM.csv", show_col_types = FALSE) %>% 
+  `colnames<-`(gsub("\\.","-", colnames(.))) %>% 
+  dplyr::rename(gene_id=`---1`)
+
+```
+
+* Define MT gene vector  
+
+```{r}
+
+mt.genes = c("ENSG00000198888", "ENSG00000198763", "ENSG00000198840",
+             "ENSG00000212907", "ENSG00000198886", "ENSG00000198786", 
+             "ENSG00000198695","ENSG00000198712", "ENSG00000198938", 
+             "ENSG00000228253", "ENSG00000198727", "ENSG00000198804", 
+             "ENSG00000198899", "ENSG00000211459","ENSG00000210082")
+
+```
+
+* Filter for MT genes  
+
+```{r}
+
+pp.tpm = pp.tpm %>% 
+  dplyr::filter(gene_id %in% mt.genes)
+
+pp.tpm %>% dim()
+
+```
+
+* Filter for necessary samples  
+
+```{r message=FALSE, warning=FALSE}
+
+samples.to.use = readr::read_csv("~/projects/amppd_analysis/data/AMPPD_sample_lists/PP-visit_month=0-case_control_other_latest==Control_unique_1015.csv", show_col_types = FALSE)$x
+
+samples.to.use %>% length()
+
+intersect(colnames(pp.tpm), samples.to.use) %>% length() # this file already contains the right samples
+
+```
+
+* Write out  
+
+```{r}
+
+pp.tpm %>% 
+  readr::write_csv(x=., file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing/PP_ctrl_log10_norm_TPM_MTonly.csv")
+
+```
+
+* Mask outliers  
+* Implement the `maskGeneOutliers()` function from the mt-nuc pipeline in a bash loop to get `_masked_outliers.csv` files for samples from each study  
+* This code needs to be run on the CMD line, rather than within the `.rmd`  
+* Needed to install the `joblib` package in the `py37` conda env  
+
+```{bash, eval=F, echo=T}
+
+# activate env containing python3.7, pandas, fire
+conda activate py37 
+
+# go to output directory
+cd /home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing
+
+# run maskGeneOutliers
+for i in $(ls *PP_ctrl_log10_norm_TPM_MTonly.csv); do echo $i; study_label=${i%%_*}; python3.7 /home/abrowne/projects/amppd_analysis/scripts/maskGeneOutliers.py --file_dir="./" --pattern=$i --filesep="," --outdir="./" --outlabel=$study_label; done
+
+mv _PP_masked_outliers.csv PP_ctrl_log10_norm_TPM_MTonly_masked_outliers.csv
+
+```
+
+
+## PP_Control log10 TPM files >> filter for MT genes >> median normalise >> masked outliers  
+
+1. Take in PP control log10 normalised TPM file from [here](~/projects/amppd_analysis/data/processed_and_unprocessed_transcriptomic/mt_nuc_corr_pipeline_output/PP_ctrl_log10_norm_TPM.csv)  
+2. Filter for MT genes  
+3. Filter for samples I will use in final analysis  
+4. Write out  
+5. Median normalise  
+6. Mask outliers  
+7. Write out  
+
+* I completed steps 1-4 above, so read in PP_ctrl_log10_norm_TPM_MTonly.csv  
+
+```{r}
+
+pp.tpm = readr::read_csv("~/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing/PP_ctrl_log10_norm_TPM_MTonly.csv", show_col_types = FALSE) 
+
+```
+
+* Median normalise using the log10MedNormalise function [here](/home/abrowne/projects/amppd_analysis/pipeline/transcriptomics/02-log10MedNormalise.R)
+
+```{r}
+
+source("/home/abrowne/projects/amppd_analysis/pipeline/transcriptomics/02-log10MedNormalise.R")
+
+log10MedNormalise(
+  file_dir="~/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing/", 
+  pattern="PP_ctrl_log10_norm_TPM_MTonly.csv", 
+  med_norm=TRUE,
+  log10=FALSE,
+  alt_outfile_name="PP_ctrl_log10_norm_TPM_MTonly_mednorm.csv"
+)
+
+```
+
+* Mask outliers  
+* Implement the `maskGeneOutliers()` function from the mt-nuc pipeline in a bash loop to get `_masked_outliers.csv` files for samples from each study  
+* This code needs to be run on the CMD line, rather than within the `.rmd`  
+* Needed to install the `joblib` package in the `py37` conda env  
+
+```{bash, eval=F, echo=T}
+
+# activate env containing python3.7, pandas, fire
+conda activate py37 
+
+# go to output directory
+cd /home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing
+
+# run maskGeneOutliers
+for i in $(ls *PP_ctrl_log10_norm_TPM_MTonly_mednorm.csv); do echo $i; study_label=${i%%_*}; python3.7 /home/abrowne/projects/amppd_analysis/scripts/maskGeneOutliers.py --file_dir="./" --pattern=$i --filesep="," --outdir="./" --outlabel=$study_label; done
+
+mv _PP_masked_outliers.csv PP_ctrl_log10_norm_TPM_MTonly_mednorm_masked_outliers.csv
+
+```
+
+# Wrangle to prepare for matrixeqtl input  
+
+* Transcriptomic files need to have the same sample set as the meta/genomic data  
+* They need to have MT genes only, as we're looking at associating mito expression with nuclear variation  
+* They also need to be transposed, cols=samples  
+
+```{r}
+
+# get mito gene list
+
+# Convert from gene.symbol to ensembl.gene
+mt.gene.sym = c("MT-ND1","MT-ND2","MT-ND3","MT-ND4L","MT-ND4","MT-ND5","MT-ND6","MT-CO2","MT-CO3","MT-ATP8","MT-CYB","MT-CO1","MT-ATP6","MT-RNR1","MT-RNR2")
+
+mt.gene.ens = ensembldb::select(EnsDb.Hsapiens.v79, keys=mt.gene.sym, keytype = "SYMBOL", columns = c("SYMBOL","GENEID")) %>% 
+  dplyr::pull(GENEID)
+
+```
+
+```{r}
+
+samples.to.use = readr::read_csv(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/PP_Control_reduce_intersect_gpc_peer_meta_sampleid.csv"), show_col_types = FALSE) %>% 
+  dplyr::pull('.')
+
+# wrangle PP_ctrl_log10_norm_TPM_MTonly_masked_outliers.csv
+vroom::vroom("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing/PP_ctrl_log10_norm_TPM_MTonly_masked_outliers.csv", show_col_types = FALSE) %>% 
+  tibble::column_to_rownames("gene_id") %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column("sample_id") %>% 
+  dplyr::filter(sample_id %in% samples.to.use) %>%
+  dplyr::arrange(match(sample_id, samples.to.use)) %>%
+  tibble::column_to_rownames("sample_id") %>%
+  t() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("sample_id") %>%
+  readr::write_csv(x=., file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing/PP_ctrl_log10_norm_TPM_MTonly_masked_outliers_wrangled.csv")
+
+# wrangle PP_ctrl_log10_norm_TPM_MTonly_mednorm_masked_outliers.csv
+vroom::vroom("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing/PP_ctrl_log10_norm_TPM_MTonly_mednorm_masked_outliers.csv", show_col_types = FALSE) %>% 
+  tibble::column_to_rownames("...1") %>%
+  `colnames<-`(gsub("\\.","-",colnames(.))) %>% 
+  tibble::rownames_to_column("sample_id") %>% 
+  tibble() %>% 
+  readr::write_csv(x=., file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing/PP_ctrl_log10_norm_TPM_MTonly_mednorm_masked_outliers_wrangled.csv")
+
+
+```
+
+* Split files into indvidual pheno files  
+
+```{r}
+
+source("/home/abrowne/projects/amppd_analysis/pipeline/prepare_indv_pheno_files_for_MatrixEQTL.R")
+
+# implement function for transcriptomic data
+prepare.indv.pheno.files.for.MatrixEQTL(file.path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/PP_Control_testing_transcriptomic_processing/",
+                                        file.pattern="masked_outliers_wrangled.csv",
+                                        loc.for.pheno.name.in.outfile="log10")
+
+```
+
+# Run matrixeqtl & wrangle output  
+
+Script to run matrixeqtl for both transcriptomic processing methods can be found [here]("/home/abrowne/projects/amppd_analysis/pipeline/run_MatrixEQTL_wrapper_test_transcriptomic_processing.R")
+
+# Analyse results - compare numbers of P<5e-08 hits between methods 
+```{r}
+
+```
+
+# Session Info  
+
+```{r}
+sessionInfo()
+```
+

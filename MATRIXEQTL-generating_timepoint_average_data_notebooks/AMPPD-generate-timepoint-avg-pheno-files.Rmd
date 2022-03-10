@@ -1,0 +1,252 @@
+---
+title: ""
+author: "Aine Fairbrother-Browne"
+date: ""
+output: 
+  html_document:
+    theme: paper
+    highlight: kate
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: false  
+    fig_width: 20
+    fig_height: 15
+    fig_caption: true
+---
+
+**Aim**: Generate timepoint averaged pheno files as `MatrixEQTL` input  
+
+# Setup  
+
+```{r setup, include=FALSE}
+
+# import libs
+library(tidyverse)
+library(vroom)
+
+# notebook settings 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/home/abrowne/projects/amppd_analysis/")
+
+```
+
+# Metadata  
+
+```{r}
+
+amppd.meta.cc.demo.rnaseq.medhist = readr::read_csv("./metadata/2020_v2release_1218/amppd-meta-cc-demo-rnaseq-medhist.csv", show_col_types = FALSE) %>% 
+  tidyr::extract(participant_id, into=c('study'), regex = "([A-Z]{2})-", remove = FALSE)
+
+```
+
+```{r}
+
+N=25
+
+low.missing.amppd.meta.cc.demo.rnaseq.medhist = amppd.meta.cc.demo.rnaseq.medhist %>% 
+  dplyr::group_by(study) %>% 
+  dplyr::summarise_all(~sum(is.na(.))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::left_join(x=., y=amppd.meta.cc.demo.rnaseq.medhist %>% 
+                     dplyr::group_by(study) %>% 
+                     dplyr::summarise(n=n()), by="study") %>% 
+  dplyr::relocate(study, n) %>% 
+  tidyr::pivot_longer(3:ncol(.), names_to="column", values_to="na.count") %>% 
+  dplyr::mutate(na.prop = ((na.count/n)*100)) %>% 
+  
+  dplyr::filter(na.prop<N) %>% 
+  dplyr::pull(column) %>% 
+  table(.) %>% 
+  .[.==3] %>% 
+  names()
+
+```
+
+```{r}
+
+amppd.meta.cc.demo.rnaseq.medhist %>% 
+  
+  dplyr::select(low.missing.amppd.meta.cc.demo.rnaseq.medhist) %>% 
+  
+  # remove cols with 'all observations missing'
+  dplyr::select(-contains(c("PF_BASES", "PF_ALIGNED_BASES", "INTRONIC_BASES", "LIBRARY", "READ_GROUP"))) %>% 
+  
+  # reorder
+  dplyr::relocate(participant_id, sample_id.x, cohort, visit_month) %>% 
+  
+  # fix name of sample_id col
+  dplyr::rename(sample_id = sample_id.x) %>% 
+  
+  # remove dup columns
+  dplyr::select(-contains(".x")) %>% 
+  dplyr::select(-contains(".y")) %>% 
+  
+  # export 
+  readr::write_csv(., paste0("./metadata/2020_v2release_1218/filtered/amppd-meta-cc-demo-rnaseq-medhist-variable-missing-n=",N,"-filt-ALL-timepoints.csv"))
+
+```
+
+# Methylation data  
+
+* Read in original methylation matrix  
+
+```{r}
+
+meth.mat = read_csv('./data/methylation_data/amppd_methylation_matrix.csv', show_col_types = F) %>% 
+  dplyr::select(-`...1`)
+
+meth.mat %>% 
+  dim()
+
+```
+
+* Read in meta as generated in the first section  
+
+```{r}
+
+meta = readr::read_csv("./metadata/2020_v2release_1218/filtered/amppd-meta-cc-demo-rnaseq-medhist-variable-missing-n=25-filt-ALL-timepoints.csv")
+
+```
+
+* Filter the methylation matrix for samples in the metadata, then add useful meta cols to the methylation matrix
+
+```{r}
+
+meth.mat = meth.mat %>% 
+  # filter for samples in metadata
+  dplyr::filter(sample_id %in% (meta %>% 
+                                  dplyr::pull(sample_id))) %>% 
+  # join some meta columns useful for dividing up the dataset
+  dplyr::left_join(x=., y=meta %>% dplyr::select(sample_id, cohort, case_control_other_latest, visit_month), by="sample_id") %>% 
+  dplyr::relocate(sample_id, cohort, case_control_other_latest, visit_month) %>% 
+  dplyr::filter(cohort!="BF")
+
+meth.mat %>% 
+  dim()
+
+```
+
+* Get timepoint averaged mismatch ratios  
+
+```{r}
+
+meth.mat.timepoint.avg = meth.mat %>% 
+  dplyr::mutate(across(everything(), ~na_if(., 1))) %>%  # ensure that 1s are masked as NAs
+  dplyr::select(matches('full|sample_id|case_control_other_latest|cohort|visit_month')) %>% 
+  dplyr::select(-matches('combined')) %>% 
+  # generate participant_id so that rows can be grouped, and averages over timepoints can be made
+  tidyr::extract(col=sample_id, into="participant_id", regex="(P.+)-", remove=F) %>% 
+  tidyr::pivot_longer(cols=6:ncol(.), names_to="MT_pos", values_to="mismatch_ratio") %>% 
+  
+  dplyr::group_by(participant_id, cohort, case_control_other_latest, MT_pos) %>% 
+  dplyr::summarise(mean.mismatch.ratio.across.timepoints = mean(mismatch_ratio, na.rm=T)) %>%
+  dplyr::ungroup() %>% 
+  
+  tidyr::pivot_wider(id_cols=c("participant_id", "cohort", "case_control_other_latest"), values_from="mean.mismatch.ratio.across.timepoints", names_from="MT_pos")
+
+```
+
+* Do outlier filtration procedure  
+
+```{r}
+
+meth.mat.timepoint.avg = meth.mat.timepoint.avg %>% 
+    tidyr::pivot_longer(4:ncol(.), names_to="MT_pos", values_to="value") %>% 
+    dplyr::group_by(MT_pos) %>% 
+    
+    # treat the dataset carefully, as a harsh outlier approach doesn't work for this highly skewed dataset, but need to remove extreme values
+    dplyr::mutate(q1=quantile(value, 0.25, na.rm=T),
+                  q3=quantile(value, 0.75, na.rm=T)) %>%
+    dplyr::mutate(iqr=q3-q1) %>%
+    dplyr::mutate(iqr10=(q3-q1)*10) %>%
+    dplyr::mutate(outlier.low=q1-iqr10,
+                  outlier.high=q3+iqr10) %>%
+  # Identify outliers 
+    dplyr::mutate(is.outlier = case_when(
+      (value > outlier.high) & (q1>0 | q3>0) ~ TRUE,
+      (value < outlier.low) & (q1>0 | q3>0) ~ TRUE)) %>% 
+    dplyr::ungroup() %>% 
+    # mask outliers
+    dplyr::mutate(is.outlier = case_when(
+      is.na(is.outlier)==T ~ "FALSE", # not an outlier when there's an NA in the is.outlier col
+      is.na(is.outlier)==F ~ "TRUE" # is an outlier when there is a value (which will be TRUE) in the is.outlier col
+    )) %>% 
+    dplyr::mutate(value = ifelse(is.outlier=="TRUE", NA, value)) %>% 
+    
+    # back to original format
+    dplyr::select(-c("q1","q3","iqr","iqr10","outlier.low","outlier.high","is.outlier")) %>% 
+    tidyr::pivot_wider(id_cols=c("participant_id", "cohort", "case_control_other_latest"), values_from="value", names_from="MT_pos") 
+
+```
+
+* Filter for 1015, remove excess cols and write out
+
+```{r}
+
+for(cohort in c("PP", "PD")){
+  
+  samples.to.use = readr::read_csv(paste0("/home/abrowne/projects/amppd_analysis/data/AMPPD_sample_lists/",cohort,"-visit_month=ALL-case_control_other_latest!=Other_unique_1015.csv"), show_col_types = FALSE) %>% 
+    tidyr::extract(col=x, into="participant_id", regex="(P.+)-", remove=F) %>% 
+    dplyr::pull(participant_id) %>% 
+    unique()
+  
+  meth.mat.timepoint.avg %>% 
+    dplyr::select(matches('full|participant_id|case_control_other_latest|cohort')) %>%
+    dplyr::select(-matches('combined')) %>% 
+    dplyr::filter(participant_id %in% samples.to.use) %>% 
+    dplyr::filter(cohort==cohort) %>% 
+    dplyr::select(-matches('case_control_other_latest|cohort')) %>% 
+    write_csv(x=., file=paste0("./data/methylation_data/all_timepoints/",cohort,"_cohort_all_timepoints_avg_methylation_matrix.csv"))
+  
+  for(status in c("Case", "Control")){
+    
+    meth.mat.timepoint.avg %>% 
+      dplyr::select(matches('full|participant_id|case_control_other_latest|cohort')) %>%
+      dplyr::select(-matches('combined')) %>% 
+      dplyr::filter(participant_id %in% samples.to.use) %>%  
+      dplyr::filter(cohort==cohort) %>% 
+      dplyr::filter(case_control_other_latest==status) %>% 
+      dplyr::select(-matches('case_control_other_latest|cohort')) %>% 
+      write_csv(x=., file=paste0("./data/methylation_data/all_timepoints/",cohort,"_",tolower(status),"_all_timepoints_avg_methylation_matrix.csv"))
+    
+  }
+}
+
+```
+
+* Check methylation matrix sizes against metadata  
+
+```{r}
+
+meta %>% 
+  dplyr::filter(cohort!="BF") %>% 
+  dplyr::group_by(cohort, case_control_other_latest) %>% 
+  dplyr::summarise(n=n())
+
+```
+
+
+```{r}
+
+for(f in list.files(path="./data/methylation_data", pattern="_all_timepoint_methylation_matrix.csv", full.names=T)){
+  
+  print(f)
+  readr::read_csv(f, show_col_types = FALSE) %>% dim() %>% print()
+  
+}
+
+```
+
+# Transcriptomic data
+
+* Read in, wrangle, generate mean across timepoints and write out - script = wrangle_meta_meth_tpm_peer_for_avg_timepoint_analysis.
+
+
+# Session Info  
+
+```{r}
+sessionInfo()
+```
+

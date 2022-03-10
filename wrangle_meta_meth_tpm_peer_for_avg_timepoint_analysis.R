@@ -16,7 +16,6 @@ require(vroom)
 calc.avg.tpm.across.timepoints = function(f){
   
   print(paste("Processing ", f))
-  
   vroom::vroom(f, show_col_types = FALSE) %>% dim() %>% print()
   
   vroom::vroom(f, show_col_types = FALSE) %>% 

@@ -1,0 +1,456 @@
+---
+title: "AMPPD-analyse-annotated-matrixEQTL-files"
+author: "Aine Fairbrother-Browne"
+date: ""
+output: 
+  html_document:
+    theme: paper
+    highlight: kate
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: false  
+    fig_width: 20
+    fig_height: 15
+    fig_caption: true
+---
+
+**Aim**: To analyse the annotated `MatrixEQTL` output. In this instance, the input was PPMI data, with cell type proportions added to the covariate files. 
+
+
+# Setup  
+
+```{r setup, include=FALSE}
+
+# import libs
+library(tidyverse)
+library(parallel)
+
+# notebook settings 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/home/abrowne/projects/amppd_analysis/")
+
+```
+
+## Define helper functions  
+
+```{r}
+
+parallel.helper = function(fn, path, pattern, cores.to.use=3){
+  
+  # Run a function, fn, across files matching pattern, pattern, in directory, path. 
+  # This will produce whatever files fn is designed to output
+  file.list = list.files(path=path, pattern=pattern, full.names=T)
+  parallel::mclapply(file.list, fn, mc.cores=cores.to.use)
+  
+}
+
+lapply.helper = function(fn, path, pattern){
+  
+  # Run a function, fn, across files matching pattern, pattern, in directory, path. 
+  # This will produce whatever files fn is designed to output
+  file.list = list.files(path=path, pattern=pattern, full.names=T)
+  lapply(X=file.list, FUN=fn)
+  
+}
+
+loop.helper = function(fn, path, pattern){
+  
+  file.list = list.files(path=path, pattern=pattern, full.names=T)
+  for(i in 1:length(file.list)){
+    fn(file.list[i])
+  }
+}
+
+```
+
+# Read in and filter appropriately  
+
+* Currently each file has 24 variables, which include: basic info (cohort, diagnosis, model), MatrixEQTL output stats, rsIDs, variantIDs, nearest gene info  
+* But the files are large, and contain lots of non-significant data that can be removed  
+* This will allow R to handle the data more easily  
+* So read in each file, filter appropriately, and add to list of dataframes   
+* Then merge into large dataframe  
+
+```{r message=FALSE, warning=FALSE}
+
+read.annot.file.apply.filter = function(file.path){
+  
+  d = vroom::vroom(file.path) 
+  
+  if( !("nearestGene.id" %in% colnames(d))) {
+    d = d %>% 
+      dplyr::mutate(nearestGene.symbol=NA, 
+                    nearestGene.id=NA,
+                    nearestGene.bioType=NA)
+  }
+  d %>%
+    # # generate col to indicate whether assoc. is with peak snp in mb block 
+    # dplyr::mutate(is.peak.snp = case_when(
+    #   SNP==peak.snp.in.mb.block ~ "Y",
+    #   SNP!=peak.snp.in.mb.block ~ "N",
+    #   TRUE ~ ""
+    # )) %>% 
+    # get only <5e-08 (genome wide sig) for the meta p.value
+    dplyr::filter(p.value<5e-08) %>%
+    # make snp col a number
+    dplyr::mutate(snp.chr=as.numeric(snp.chr)) %>% 
+    return(.)
+  
+}
+
+```
+
+```{r message=FALSE, warning=FALSE}
+
+eqtl.res.filtered = lapply.helper(fn=read.annot.file.apply.filter, path="./data/MatrixEQTL_output/celltype_PP_samples_filtered/", pattern="_wrangled.csv") %>% 
+  .[lapply(., length) > 0] %>% 
+  .[map(., ~dim(.)[1]) > 0] %>% 
+  dplyr::bind_rows() %>% 
+  readr::write_csv(x=., file="./data/MatrixEQTL_output/celltype_PP_samples_filtered/aggregated_tables/eqtl_res_filtered.csv")
+
+```
+
+```{r}
+
+eqtl.res.filtered = readr::read_csv(file="./data/MatrixEQTL_output/celltype_PP_samples_filtered/aggregated_tables/eqtl_res_filtered.csv")
+
+```
+
+* run the above, collecting all (filtered) results into a table  
+* run some enrichment 
+* check for presence of mitocarta and mitocop genes
+* enrichment in disease gene lists  
+
+```{r}
+
+# these results have a p.value of <5e-08
+# the phenotype is expression 
+exp.res = eqtl.res.filtered %>% 
+  dplyr::filter(phenotype.category=="expression") %>% 
+  dplyr::arrange(p.value) %>% 
+  dplyr::distinct()
+
+```
+
+* Could draw a cut-off for 'trustworthy' MT sites at min. 25% non-missing data in case and control  
+* These sites are 5647, 5721, 7526, 9999, 5883, 5818, 2617
+
+```{r}
+
+meth.res = eqtl.res.filtered %>% 
+  dplyr::filter(phenotype.category=="methylation") %>% 
+  dplyr::filter(phenotype %in% paste0(c(5647, 5721, 7526, 9999, 5883, 5818, 2617), "_full")) %>% 
+  dplyr::arrange(p.value) %>% 
+  dplyr::distinct()
+
+```
+
+## Annotate top hits  
+
+```{r}
+
+source("/home/abrowne/projects/amppd_analysis/scripts/query-api-genetics-opentargets-with-helper-funs.R")
+
+meth.res = lapply(X=meth.res$variant.id, FUN=query.opentargets.with.varIDs) %>%
+  dplyr::bind_rows() %>% 
+  tibble::as_tibble() %>%
+  dplyr::mutate(snp.chr.pos=paste0("chr",chromosome,":",position)) %>%
+  dplyr::select(any_of( c("snp.chr.pos", "nearestGene.id", "nearestGene.symbol", "nearestGene.bioType") )) %>%
+  dplyr::distinct() %>%
+  dplyr::left_join(x=meth.res , y=., by="snp.chr.pos") %>% 
+  dplyr::select(-(ends_with(".x"))) %>% 
+  dplyr::rename_all(~str_replace_all(.,"\\.y",""))
+
+```
+
+```{r}
+
+# run OpenTargets annotation using query.opentargets.with.varIDs, and join back to original df 
+exp.res = lapply(X=exp.res$variant.id, FUN=query.opentargets.with.varIDs) %>%
+  dplyr::bind_rows() %>% 
+  tibble::as_tibble() %>%
+  dplyr::mutate(snp.chr.pos=paste0("chr",chromosome,":",position)) %>%
+  dplyr::select(any_of( c("snp.chr.pos", "nearestGene.id", "nearestGene.symbol", "nearestGene.bioType") )) %>%
+  dplyr::distinct() %>%
+  dplyr::left_join(x=exp.res , y=., by="snp.chr.pos") %>% 
+  dplyr::select(-(ends_with(".x"))) %>% 
+  dplyr::rename_all(~str_replace_all(.,"\\.y",""))
+
+```
+
+# Look at top hits  
+
+## Define `plot.indiv.assocs`
+
+* This is a function to pull out raw data for selected SNP-gene or SNP-MTpos combination, run lm() and plot
+
+```{r}
+
+plot.indiv.assocs = function(pheno, snp_chr_pos, exp_or_meth, cohort, diagnosis){
+  
+  # pheno: ENS code for the MT gene from which expression is derived, or MT position for which the methylation prop. is derived
+  # snp_chr_pos: chr:pos format for SNP location
+  # exp_or_meth: looking at expression or methylation data
+  # cohort:
+  # diagnosis:
+  
+  snp_chr_pos = gsub(":", "-", snp_chr_pos)
+  
+  if(diagnosis=="cohort"){
+    s1 = vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/celltype_PP_samples_filtered/", cohort, "_cohort_all_chrs-maf0.05_geno_matrix_012_wrangled-8b.csv")) %>%
+      tibble::column_to_rownames("pos") %>%
+      .[snp_chr_pos, ]
+  } else{
+    s1 = vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/celltype_PP_samples_filtered/", cohort, "_", tolower(diagnosis), "_all_chrs-maf0.05_geno_matrix_012_wrangled-8b.csv")) %>%
+      tibble::column_to_rownames("pos") %>%
+      .[snp_chr_pos, ]
+  }
+  if(exp_or_meth=="expression"){
+    e1 = vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/", cohort, "_", diagnosis, "_pheno=",pheno,"_log10_mediannorm_TPM_masked_outliers_q1-3iqr_q3+3iqr_MT_ONLY.csv")) %>%
+      dplyr::filter(if_any(everything(), ~ !is.na(.))) %>%
+      tibble::column_to_rownames("sample_id") %>%
+      `colnames<-`(colnames(s1))
+  }
+  if(exp_or_meth=="methylation"){
+    e1 = vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/", cohort, "_", diagnosis, "_pheno=", pheno,"_methylation_matrix_MatrixEQTL_input.csv")) %>%
+      dplyr::filter(if_any(everything(), ~ !is.na(.))) %>%
+      tibble::column_to_rownames("sample_id") %>%
+      `colnames<-`(colnames(s1))
+  }
+  
+  cov = vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/celltype_PP_samples_filtered/", cohort, "_", diagnosis, "_maf0.05_cov_table_for_MatrixEQTL.csv")) %>%
+    tibble::column_to_rownames("variable") %>%
+    `colnames<-`(colnames(s1))
+  
+  all = rbind(e1, s1, cov) %>%
+    t() %>%
+    as.data.frame()
+  
+  formula = all[,pheno] ~ all[,snp_chr_pos]
+  
+  # + all[, "gPC1"] + all[, "gPC2"] + all[, "gPC3"] + all[, "gPC4"] + all[, "gPC5"] + all[, "PEER1"] + all[, "PEER2"] + all[, "PEER3"] + all[, "PEER4"] + all[, "PEER5"] + all[, "PEER6"] + all[, "PEER7"] + all[, "PEER8"] + all[, "PEER9"] + all[, "PEER10"] + all[, "sex"] + all[, "age_at_baseline"]
+  
+  lm1 = lm(formula=formula,
+           data=all,
+           na.action="na.exclude")
+  
+  # to allow vars to be used to select cols within ggplot call
+  snp_chr_pos = sym(snp_chr_pos)
+  pheno=sym(pheno)
+  
+  return(
+    all %>% 
+      tidyr::drop_na() %>% 
+      dplyr::mutate(geno.label=case_when(
+        snp_chr_pos==0 ~ "AA",
+        snp_chr_pos==1 ~ "AB",
+        snp_chr_pos==2 ~ "BB"
+      )) %>% 
+      tibble::rownames_to_column("sample.id") %>% 
+      dplyr::filter(sample.id %in% names(lm1$fitted.values)) %>% 
+      
+      ggplot(data=., aes(x=factor(!!snp_chr_pos), y=!!pheno)) +
+      theme_minimal() +
+      geom_boxplot() +
+      geom_point(position="jitter", alpha=0.5) +
+      geom_smooth(mapping=aes(group=1), method="lm", se=T, fullrange=F) +
+      xlab("Genotype") +
+      ylab(pheno)
+  )
+  
+}
+
+```
+
+```{r}
+
+exp.res %>% 
+  dplyr::arrange(FDR)
+
+```
+
+
+```{r}
+
+plot.indiv.assocs(pheno="ENSG00000212907",
+                  snp_chr_pos="chr8:81049220", 
+                  exp_or_meth="expression", 
+                  cohort="PP", 
+                  diagnosis="Control"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="ENSG00000198938",
+                  snp_chr_pos="chr1:53083314", 
+                  exp_or_meth="expression", 
+                  cohort="PP", 
+                  diagnosis="Control"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="ENSG00000198695",
+                  snp_chr_pos="chr10:16639487", 
+                  exp_or_meth="expression", 
+                  cohort="PP", 
+                  diagnosis="Control"
+)
+
+```
+
+```{r}
+
+meth.res %>% 
+  dplyr::group_by(chr.mb.block.id, phenotype, cohort, diagnosis, matrixeqtl.model.run) %>% 
+  dplyr::slice(which.min(p.value)) %>% 
+  dplyr::arrange(FDR) %>%
+  print(n=Inf)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="9999_full",
+                  snp_chr_pos="chr14:35324344", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="Case"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="5647_full",
+                  snp_chr_pos="chr6:168931116", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="Case"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="5647_full",
+                  snp_chr_pos="chr17:26885974", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="Control"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="5818_full",
+                  snp_chr_pos="chr10:24344856", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="cohort"
+)
+
+```
+
+```{r}
+
+meth.res %>% 
+  dplyr::group_by(chr.mb.block.id, phenotype, cohort, diagnosis, matrixeqtl.model.run) %>% 
+  dplyr::slice(which.min(p.value)) %>% 
+  dplyr::arrange(FDR) %>%
+  print(n=Inf)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="5721_full",
+                  snp_chr_pos="chr13:49285202", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="Control"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="5647_full",
+                  snp_chr_pos="chr18:45756955", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="Control"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="5883_full",
+                  snp_chr_pos="chr17:77367109", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="Control"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="9999_full",
+                  snp_chr_pos="chr12:118791402", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="Case"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="5647_full",
+                  snp_chr_pos="chr2:227079192", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="Case"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="5647_full",
+                  snp_chr_pos="chr19:35352642", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="Control"
+)
+
+```
+
+```{r}
+
+plot.indiv.assocs(pheno="9999_full",
+                  snp_chr_pos="chr11:100314270", 
+                  exp_or_meth="methylation", 
+                  cohort="PP", 
+                  diagnosis="cohort"
+)
+
+```
+
+
+
+
+
+
+
+
+

@@ -7,6 +7,7 @@
 # conda activate r4-base
 # cd /home/abrowne/projects/amppd_analysis/pipeline/
 
+# the following had to be installed:
 # conda install -c conda-forge r-stringi
 # conda install -c conda-forge r-tzdb
 # conda install -c r r-tidyversecd
@@ -77,31 +78,6 @@ read.matrixeqtl.pheno.output.wrangle.write = function(path, pattern){
   parallel::mclapply(file.list, wrangle.write.file, mc.cores=4)
 }
 
-read.annot.file.apply.filter = function(file.path){
-  
-  d = vroom::vroom(file.path) 
-  
-  if( !("nearestGene.id" %in% colnames(d))) {
-    d = d %>% 
-      dplyr::mutate(nearestGene.symbol=NA, 
-                    nearestGene.id=NA,
-                    nearestGene.bioType=NA)
-  }
-  d %>%
-    dplyr::filter(p.value<1e-03) %>%
-    # make snp col a number
-    dplyr::mutate(snp.chr=as.numeric(snp.chr)) %>% 
-    return(.)
-}
-lapply.helper = function(fn, path, pattern){
-  
-  # Run a function, fn, across files matching pattern, pattern, in directory, path. 
-  # This will produce whatever files fn is designed to output
-  file.list = list.files(path=path, pattern=pattern, full.names=T)
-  lapply(X=file.list, FUN=fn)
-  
-}
-
 #### -------------- implement functions -------------- ####
 
 ## implement read.matrixeqtl.pheno.output.wrangle.write
@@ -111,34 +87,13 @@ lapply.helper = function(fn, path, pattern){
 # read.matrixeqtl.pheno.output.wrangle.write(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/celltype_plus_standard_correction_with_PEER/", 
 #                                            pattern="MatrixEQTL.csv")
 
-## implement read.annot.file.apply.filter on wrangled raw files, collate into aggregated table and write out
-# lapply.helper(fn=read.annot.file.apply.filter, path="./data/MatrixEQTL_output", pattern="_wrangled.csv", p.cutoff=1e-03) %>%
-#   # then filter list of files and bind them together
-#   .[lapply(., length) > 0] %>%
-#   .[map(., ~dim(.)[1]) > 0] %>%
-#   dplyr::bind_rows() %>%
-#   # remove extra cols
-#   dplyr::select(-(ends_with(".x"))) %>%
-#   dplyr::select(-(ends_with(".y"))) %>%
-#   dplyr::select(-contains("nearestGene")) %>%
-#   readr::write_csv(x=., file="./data/MatrixEQTL_output/aggregated_tables/matrixeqtl_res_aggregated_p1e-03_filter.csv")
-
-# run for mega
+# # run for mega
 read.matrixeqtl.pheno.output.wrangle.write(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/PP_PD_mega_analysis/",
                                            pattern="MatrixEQTL.csv")
-lapply.helper(fn=read.annot.file.apply.filter, path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/PP_PD_mega_analysis/", pattern="_wrangled.csv") %>%
-  # then filter list of files and bind them together
-  .[lapply(., length) > 0] %>%
-  .[map(., ~dim(.)[1]) > 0] %>%
-  dplyr::bind_rows() %>%
-  # remove extra cols
-  dplyr::select(-(ends_with(".x"))) %>%
-  dplyr::select(-(ends_with(".y"))) %>%
-  dplyr::select(-contains("nearestGene")) %>%
-  readr::write_csv(x=., file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/PP_PD_mega_analysis/aggregated_tables/matrixeqtl_mega_res_aggregated_p1e-03_filter.csv")
 
-
-
+# # run for timepoint
+# read.matrixeqtl.pheno.output.wrangle.write(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/all_timepoints/",
+#                                            pattern="MatrixEQTL.csv")
 
 
 

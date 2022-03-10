@@ -6,13 +6,14 @@
 # runs all files in parallel
 # takes a dataframe in the form samples = cols, genes = rows
 
-log10MedNormalise = function(file_dir="", pattern=".csv", filesep=",", outlabel="", med_norm=TRUE){
+log10MedNormalise = function(file_dir="", pattern=".csv", filesep=",", outlabel="", med_norm=TRUE, log10=TRUE, alt_outfile_name=""){
   
   # file_dir: directory where input file is stored
   # pattern: string pattern to recognise multiple files - if using one file, simply give full file name
   # filesep: separator of file (i.e. \t or ,)
   # outlabel: label to add to the output file. Allows next pipeline fn. to find it easily
   # med_norm: can disable median normalisation by setting this to FALSE
+  # log10: can disable log10 by setting this to FALSE
   
   library(beadarray)
   library(parallel)
@@ -32,8 +33,8 @@ log10MedNormalise = function(file_dir="", pattern=".csv", filesep=",", outlabel=
     
     df = read.csv(file=paste0(file_dir, f), sep=filesep, row.names=1, header=T)
     
-    # samples to cols
-    if(length(colnames(df)) > length(rownames(df))){
+    # samples to cols - if ENS code is in the columns, genes are cols so flip the df 
+    if(grepl( "ENS", colnames(df)[2], fixed = TRUE) == TRUE){
       df = data.frame(t(df))
     }
     
@@ -65,23 +66,36 @@ log10MedNormalise = function(file_dir="", pattern=".csv", filesep=",", outlabel=
     print("getting all NA in filtered df")
     print(sum(is.na(df)))
     
-    print("log10 normalising")
-    pseudoCount = log10(df + 1)
-    
-    print("pseudoCount table: ")
+    if(log10==TRUE){
+      print("log10 normalising")
+      df = log10(df + 1)
+    }
     
     print("writing outfiles")
     if(med_norm==TRUE){
+      print("Calculating med norm")
       # median normalise with the "beadarray" module in R
       # medianNormalise normalises expression across columns - so samples should be cols
-      MedianpseudoCount = medianNormalise(pseudoCount, log=F)
-      print(dim(MedianpseudoCount))
-      print("exporting file")
-      write.csv(MedianpseudoCount, file=paste0(file_dir, gsub(pattern, "", file_name), "_", outlabel, "_log10_mediannorm_TPM.csv"))
+      MedianpseudoCount = medianNormalise(df, log=F)
+      
+      if(length(alt_outfile_name)==0){
+        outfile_name = paste0(file_dir, gsub(pattern, "", file_name), "_", outlabel, "_log10_mediannorm_TPM.csv")
+      }else{
+        outfile_name = paste0(file_dir, alt_outfile_name)
+      }
+      
+      write.csv(MedianpseudoCount, file=outfile_name)
     }
     
     if(med_norm==FALSE){
-      write.csv(pseudoCount, file=paste0(file_dir, gsub(pattern, "", file_name), "_", outlabel, "_log10_norm_TPM.csv"))
+      
+      if(length(alt_outfile_name)==0){
+        outfile_name = paste0(file_dir, gsub(pattern, "", file_name), "_", outlabel, "_log10_mediannorm_TPM.csv")
+      }else{
+        outfile_name = paste0(file_dir, alt_outfile_name)
+      }
+      
+      write.csv(df, file=outfile_name)
     }
   }
   

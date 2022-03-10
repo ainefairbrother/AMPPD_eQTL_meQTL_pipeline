@@ -1,0 +1,272 @@
+---
+title: "AMPPD stratified pipeline: featurecount matrices > TPM > normalisation > generate PEER factors and correlate to metadata"
+author: "Aine Fairbrother-Browne"
+date: ""
+output: 
+  html_document:
+    theme: paper
+    highlight: kate
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: false  
+    fig_width: 20
+    fig_height: 15
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+
+# import libs
+library(tidyverse)
+library(vroom)
+library(purrr)
+library(viridis)
+library(cleandata)
+
+# notebook settings 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/home/abrowne/projects/amppd_analysis/")
+
+```
+
+# Read in AMP-PD featurecount matrix  
+
+```{r, eval=FALSE}
+
+count.mat = vroom("./data/AMPPD_featurecounts_dataframe.csv", show_col_types = FALSE) %>%
+  tibble::column_to_rownames(var="Geneid") %>% 
+  dplyr::rename_with(., ~gsub('\\.', '-', .)) %>% 
+  tibble::rownames_to_column("gene_id") %>% 
+  dplyr::mutate(gene_id = gsub("\\..*", "", gene_id)) %>% 
+  dplyr::distinct(gene_id, .keep_all = T) %>% 
+  tibble::column_to_rownames("gene_id")
+
+
+```
+
+* Some genes lost due to gene version number filtration  
+
+```{r, eval=FALSE}
+
+# before gene version filter
+vroom("./data/AMPPD_featurecounts_dataframe.csv", show_col_types = FALSE) %>% dim()
+
+# after gene version filter
+count.mat %>% dim()
+
+```
+
+```{r}
+
+count.mat %>% dim()
+count.mat %>% dplyr::select(1:10) %>% colnames(.)
+count.mat %>% .[1:10,1:10] %>% rownames(.)
+
+```
+
+# Read in AMP-PD metadata  
+
+```{r message=FALSE, warning=FALSE}
+
+meta.cc.demo.rna = vroom("./metadata/metadata-cohort-tables/amppd-meta-cc-demo-rnaseq.csv", show_col_types = FALSE)
+meta.cc.demo.rna.medhist = vroom("./metadata/2020_v2release_1218/filtered/amppd-meta-cc-demo-rnaseq-medhist-variable-missing-n=80-filt.csv", show_col_types = FALSE)
+
+```
+
+* Check sample numbers under the key filters for the two tables demo.rna and demo.rna.medhist  
+
+```{r}
+
+meta.cc.demo.rna %>% 
+  dplyr::filter(cohort %in% c("PP", "PD", "BF")) %>% 
+  dplyr::filter(visit_month==0) %>% 
+  dplyr::filter(case_control_other_latest!="Other") %>% 
+  dplyr::pull(participant_id) %>% 
+  unique() %>% 
+  length()
+# [1] 2880
+
+meta.cc.demo.rna.medhist %>% 
+  dplyr::filter(cohort %in% c("PP", "PD", "BF")) %>% 
+  dplyr::filter(visit_month==0) %>% 
+  dplyr::filter(case_control_other_latest!="Other") %>% 
+  dplyr::pull(participant_id) %>% 
+  unique() %>% 
+  length()
+# [1] 2923
+
+```
+
+# Get usable samples from metadata  
+
+```{r}
+
+meta.cc.demo.rna.medhist %>% colnames(.)
+
+```
+
+* Some of the entries for `case_control_other_latest` are other, and as such, these samples will be filtered out like `case_control_other_latest!="Other"`  
+* We also only want baseline samples, so `visit_month == 0`  
+
+```{r}
+
+samples.to.filter.for = meta.cc.demo.rna %>% 
+  dplyr::filter(cohort %in% c("PP", "PD", "BF")) %>% 
+  dplyr::filter(case_control_other_latest!="Other") %>% 
+  dplyr::filter(visit_month == 0) %>% 
+  dplyr::pull(sample_id.x)
+
+```
+
+```{r}
+
+meta.cc.demo.rna %>% 
+  dplyr::filter(cohort %in% c("PP", "PD", "BF")) %>% 
+  dplyr::filter(case_control_other_latest!="Other") %>% 
+  dplyr::filter(visit_month == 0) %>%
+  dplyr::group_by(cohort, case_control_other_latest) %>% 
+  dplyr::summarise(n=n())
+
+```
+
+# Filter `count.mat`  
+
+```{r, eval=FALSE}
+
+count.mat.filt = count.mat %>% 
+  dplyr::select(all_of(samples.to.filter.for)) %>% 
+  as.data.frame()
+
+```
+
+# Generate separate case and control tpm matrices for all cohorts  
+
+```{r, eval=FALSE}
+
+for(i in c("PD", "PP", "BF")){
+  
+  case.sampleid = meta.cc.demo.rna %>% 
+    dplyr::filter(cohort %in% c(i)) %>% 
+    dplyr::filter(case_control_other_latest=="Case") %>% 
+    dplyr::filter(visit_month == 0) %>%
+    dplyr::pull(sample_id.x)
+  
+  ctrl.sampleid = meta.cc.demo.rna %>% 
+    dplyr::filter(cohort %in% c(i)) %>% 
+    dplyr::filter(case_control_other_latest=="Control") %>% 
+    dplyr::filter(visit_month == 0) %>%
+    dplyr::pull(sample_id.x)
+  
+  count.mat.filt %>%
+    dplyr::select(all_of(case.sampleid)) %>%
+    write.csv(., paste0("./data/",i,"_case_featurecount_matrix.csv"))
+  
+  count.mat.filt %>%
+    dplyr::select(all_of(ctrl.sampleid)) %>%
+    write.csv(., paste0("./data/",i,"_ctrl_featurecount_matrix.csv"))
+  
+}
+
+```
+
+# Run `counts2TPM`  
+
+* Implement python function `counts2TPM` in a bash loop to get `_TPM.csv` files  
+* This code needs to be run on the CMD line, rather than within the `.rmd`  
+* I used the commands in the script `~/projects/amppd_analysis/scripts/create_conda_env_mt_nuc.sh` to generate the necessary conda environment in which to run the pipeline  
+
+```{bash, eval=F, echo=T}
+
+# activate env containing python3.7, pandas, fire
+conda activate py37 
+
+# go to wd
+cd /home/abrowne/projects/amppd_analysis/data/
+
+# run counts2TPM
+for i in $(ls *{case,ctrl}_featurecount_matrix.csv); do echo $i; study_label=${i%%_feature*}; python3.7 /home/abrowne/projects/amppd_analysis/scripts/counts2TPM.py --file_dir="./" --gene_length_dir="./amppd_gene_lengths.csv" --pattern=$i --filesep="," --outdir="./mt_nuc_corr_pipeline_output/" --outlabel=$study_label; done
+=
+```
+
+# Check `counts2TPM` output  
+
+```{r, eval=FALSE}
+
+vroom("./data/mt_nuc_corr_pipeline_output/BF_case_TPM.csv", show_col_types = FALSE) %>% 
+  tibble::column_to_rownames("...1") %>% 
+  dim()
+
+```
+
+# Run `log10MedNormalise()`  
+
+* This function filters out samples with 0 TPM in all genes and genes with 0 TPM in all samples  
+* remove individuals that have zero reads  
+`print("removing individuals with 0 reads")`  
+`test = apply(df, 2, function(x) { all(x > 0)})`  
+* remove genes that have zero reads  
+`print("removing genes with 0 reads")`  
+`test = apply(df, 1, function(x) { all(x > 0)})`    
+* Generate `_log10_mediannorm_TPM.csv` and `_log10_norm_TPM.csv` files  
+
+
+```{r, eval=F, echo=T}
+
+source("./scripts/log10MedNormalise.R")
+
+for(i in c("BF", "PD", "PP")){ 
+  
+  for(j in c("case", "ctrl")){
+    
+    log10MedNormalise(
+      file_dir="./data/mt_nuc_corr_pipeline_output/", 
+      pattern=paste0(i,"_",j,"_TPM.csv"), 
+      filesep=",", 
+      outlabel=paste0(i,"_",j), 
+      med_norm=TRUE
+    )
+  }
+}
+
+```
+
+```{r, eval=FALSE}
+
+source("./scripts/log10MedNormalise.R")
+
+for(i in c("BF", "PD", "PP")){ 
+  
+  for(j in c("case", "ctrl")){
+    
+    log10MedNormalise(
+      file_dir="./data/mt_nuc_corr_pipeline_output/", 
+      pattern=paste0(i,"_",j,"_TPM.csv"), 
+      filesep=",", 
+      outlabel=paste0(i,"_",j), 
+      med_norm=FALSE
+    )
+  }
+}
+
+
+```
+
+* Remove trailing _ from filenames: e.g. `_X_Y_log10_mediannorm_TPM.csv`  
+* Run this in the Terminal, not via the .rmd   
+
+```{bash, eval=FALSE, include=TRUE}
+
+cd /home/abrowne/projects/amppd_analysis/data/mt_nuc_corr_pipeline_output/
+
+for f in _*; do mv -- "$f" "${f##*(_)}"; done
+
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+

@@ -8,13 +8,17 @@ run.matrixeqtl = function(
 ){
   
   # # test
-  # cohort = "BF"
-  # diag = "Case"
-  # diag.lower = "case"
-  # SNP_file_name = paste0("./MatrixEQTL_input/genomics/",cohort,"_",diag.lower,"_all_chrs-maf0.05_geno_matrix_012_wrangled-8b.csv")
-  # pheno_file_name = paste0("./MatrixEQTL_input/transcriptomics/",cohort,"_",diag,"_pheno=_log10_mediannorm_TPM_masked_outliers_q1-3iqr_q3+3iqr_MT_ONLY.csv")
-  # covariates_file_name = paste0("./MatrixEQTL_input/covariates/",cohort,"_",diag,"_maf0.05_cov_table_for_MatrixEQTL.csv")
-  # output_file_name = paste0("./MatrixEQTL_output/",cohort,"_",diag,"_pheno=_maf=0.05_phenotype=expression_model=LINEAR_MatrixEQTL.csv")
+  # cohort = "PP"
+  # diag = "Control"
+  # if(diag=="Case"){diag.lower="case"}
+  # if(diag=="Control"){diag.lower="control"}
+  # 
+  # SNP_file_name = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/all_timepoints/test.csv")
+  # # include pheno= in pheno_file_name as a placemarker for the run.matrixeqtl function to replace it with the actual phenotype label
+  # pheno_file_name = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/all_timepoints/",cohort,"_",diag,"_timepoint_averaged_pheno=_log10_mediannorm_TPM_masked_outliers_q1-3iqr_q3+3iqr_MT_ONLY.csv")
+  # covariates_file_name = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/all_timepoints/",cohort,"_",diag,"_averaged_timepoint_maf0.05_cov_table_for_MatrixEQTL.csv")
+  # # include pheno= in output_file_name as a placemarker for the run.matrixeqtl function to replace it with the actual phenotype label
+  # output_file_name = paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_output/all_timepoints/",cohort,"_",diag,"_pheno=_maf=0.05_phenotype=expression_model=LINEAR_MatrixEQTL.csv")
   # which_model="modelLINEAR"
   # which_pheno="expression"
   
@@ -67,7 +71,7 @@ run.matrixeqtl = function(
   # load genotype matrix
   snps = SlicedData$new()
   snps$fileDelimiter = ","       # define the sep of the file - i.e comma or space separated file
-  snps$fileOmitCharacters = "NA" # denote missing values
+  snps$fileOmitCharacters = "-1"  # denote missing values - the missing values are defined as -1 by vcftools --012
   snps$fileSkipRows = 1          # one row of column labels
   snps$fileSkipColumns = 1       # one column of row labelsjavascript:
   snps$fileSliceSize = 2000      # read file in pieces of 2,000 rows
@@ -99,14 +103,14 @@ run.matrixeqtl = function(
   # loop through the individual phenotypes, read in pheno file (into obj called gene), run matrix eqtl and produce a qq plot for QC purposes
   for(pheno in phenos){
     
-    # replace "pheno=" with "pheno=ENS" to match the correct file
-    indv.pheno.file.name = gsub("./MatrixEQTL_input", paste0(getwd(),"/MatrixEQTL_input"), 
-                                gsub("pheno=", paste0("pheno=", pheno), pheno_file_name))
-    indv.output.file.name = gsub("./MatrixEQTL_output", paste0(getwd(),"/MatrixEQTL_output"), 
-                                 gsub("pheno=", paste0("pheno=", pheno), output_file_name))
+    # generate pheno input file name and output file name
+    indv.pheno.file.name = gsub("pheno=", paste0("pheno=", pheno), pheno_file_name)
+    indv.output.file.name = gsub("pheno=", paste0("pheno=", pheno), output_file_name)
     
     # test whether pheno file exists, if it does not, skip to the next phenotype 
     if(file.exists(indv.pheno.file.name)){
+      
+      print(paste("Generating", indv.output.file.name))
       
       # load expression matrix
       gene = SlicedData$new()
@@ -119,15 +123,18 @@ run.matrixeqtl = function(
       
       # Finally, the main Matrix eQTL function is called:
       me = Matrix_eQTL_engine(
-        snps = snps,
-        gene = gene,
-        cvrt = cvrt,
-        output_file_name = indv.output.file.name,
-        pvOutputThreshold = pvOutputThreshold,
-        useModel = useModel,
+        snps = snps, # SNPs
+        gene = gene, # pheno
+        cvrt = cvrt, # covariates
+        output_file_name = indv.output.file.name, # name of the output file
+        # Set pvOutputThreshold > 0 and pvOutputThreshold.cis = 0 (or use Matrix_eQTL_engine)
+        # to perform eQTL analysis without using gene/SNP locations. Associations significant at the
+        # pvOutputThreshold level are be recorded in output_file_name and in the returned object
+        pvOutputThreshold = pvOutputThreshold, # Significance threshold for all/distant tests.
+        useModel = useModel, # which model to use, define above
         errorCovariance = errorCovariance,
-        verbose = TRUE,
-        min.pv.by.genesnp = FALSE,
+        verbose = FALSE, # get progress report
+        min.pv.by.genesnp = FALSE, # record the minimum p-value for each SNP and each gene in the returned object                                                                                                                                                        
         noFDRsaveMemory = FALSE,
         pvalue.hist = "qqplot")
       
@@ -135,27 +142,6 @@ run.matrixeqtl = function(
       tiff(gsub(".csv", "_qq.tiff", indv.output.file.name)) 
       plot(me, pch = 16, cex = 0.7)
       dev.off() 
-      
-      # # run Matrix_eQTL_engine to generate pval dist plot and save
-      # me = Matrix_eQTL_engine(
-      #   snps = snps,
-      #   gene = gene,
-      #   cvrt = cvrt,
-      #   output_file_name = output_file_name,
-      #   pvOutputThreshold = pvOutputThreshold,
-      #   useModel = useModel,
-      #   errorCovariance = errorCovariance,
-      #   verbose = TRUE,
-      #   min.pv.by.genesnp = FALSE,
-      #   noFDRsaveMemory = FALSE,
-      #   pvalue.hist = 100)
-      # 
-      # tiff(gsub(".csv", "_pdist.tiff", output_file_name)) 
-      # plot(me, col="grey")
-      # dev.off() 
-      
-      # # save .me object 
-      # save(me, file=gsub(".csv", ".Rdata", output_file_name))
       
       # Each significant gene-SNP association is recorded in a separate line in the output file and in the returned object me. 
       # In case of cis/trans eQTL analysis described below, two output files are produced, one with cis-eQTLs, another only with trans. 

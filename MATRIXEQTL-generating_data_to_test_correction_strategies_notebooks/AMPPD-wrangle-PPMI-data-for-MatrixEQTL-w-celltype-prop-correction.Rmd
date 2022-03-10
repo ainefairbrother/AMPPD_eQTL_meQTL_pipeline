@@ -1,0 +1,509 @@
+---
+title: ""
+author: "Aine Fairbrother-Browne"
+date: ""
+output: 
+  html_document:
+    theme: paper
+    highlight: kate
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: false  
+    fig_width: 20
+    fig_height: 15
+    fig_caption: true
+---
+
+**Aim**: To filter all of the PPMI `MatrixEQTL` input files down to the samples which have celltype proportion data associated with them  
+
+Outputs stored in `/dir/celltype_PP_samples_filtered` within each data type directory  
+
+# Setup  
+
+```{r setup, include=FALSE}
+
+# import libs
+library(tidyverse)
+
+# notebook settings 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/home/abrowne/projects/")
+
+```
+
+# Load PPMI celltype metadata  
+
+```{r}
+
+PP.celltype.prop = read.csv(file="/home/algil/PPMI/loni/processed_data/ppmi_hema.csv", header = TRUE)
+
+```
+
+* The % values for cellular proportions are in the `LSIRES` column  
+* We are interested only in the information related to cell types, we will filter `LGROUP` for `HEMAT`  
+* We will then select the proportions, indicated by `%` signs, and pivot such that celltypes are variables  
+
+```{r}
+
+PP.celltype.prop.screening = PP.celltype.prop %>% 
+  as.data.frame() %>% 
+  dplyr::filter(LGROUP=="HEMAT") %>% 
+  dplyr::filter(LVISTYPE =="Screening") %>% 
+  dplyr::select(participant_id, case_control_other_latest, LTSTNAME, LSIRES) %>% 
+  dplyr::filter(grepl("%",LTSTNAME)) %>% 
+  dplyr::distinct() %>% 
+  tidyr::pivot_wider(id_cols=c("participant_id", "case_control_other_latest"), names_from="LTSTNAME", values_from="LSIRES") %>% 
+  `colnames<-`(gsub(" \\(%\\)", "_percent", colnames(.)))
+
+PP.celltype.prop.screening
+
+```
+
+# Filter the `MatrixEQTL input data`  
+
+* How many samples are available for PP_Case and PP_Control?  
+
+```{r}
+
+PP.celltype.prop.screening %>% 
+  dplyr::group_by(case_control_other_latest) %>% 
+  dplyr::summarise(n=n())
+
+```
+
+# Add celltype proportions to covariate files  
+
+* Wrangle cell type props to the appropriate shape and order first  
+
+```{r}
+
+for(diagnosis in c("Case", "Control")){
+  
+  existing.cov.table = readr::read_csv(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/PP_",diagnosis,"_maf0.05_cov_table_for_MatrixEQTL.csv"))
+  
+  # filter and reshape celltype data
+  celltype.diagnosis.filtered = PP.celltype.prop.screening %>% 
+    dplyr::filter(case_control_other_latest==diagnosis) %>% 
+    dplyr::select(-case_control_other_latest) %>% 
+    tibble::column_to_rownames("participant_id") %>% 
+    t() %>% 
+    as.data.frame() %>% 
+    dplyr::mutate_all(na_if,"") %>% 
+    .[,colSums(is.na(.))<nrow(.)] %>% 
+    tibble::rownames_to_column("participant_id") %>% 
+    tibble::as.tibble() %>% 
+    `colnames<-`(paste0(colnames(.), "-BLM0T1")) %>% 
+    dplyr::rename(participant_id=`participant_id-BLM0T1`)
+  
+  # get samples with celltype and covariate data
+  samples.with.celltype.data.and.covs = intersect(
+    # get sample with covariate data for PP control
+    existing.cov.table %>% colnames(.) %>% .[-1],
+    # get samples with celltype data for PP control 
+    celltype.diagnosis.filtered %>% colnames(.) %>% .[-1]
+  ) #
+  
+  length(samples.with.celltype.data.and.covs) %>% print()# 467
+  
+  # filter existing covariate table and then add celltype metadata to it
+  existing.cov.table.filtered = existing.cov.table %>% 
+    tibble::column_to_rownames("variable") %>% 
+    .[,samples.with.celltype.data.and.covs] %>% 
+    tibble::rownames_to_column("variable") %>% 
+    tibble::as.tibble()
+  
+  # filter celltype table and order
+  ordered.celltype.diagnosis.filtered = celltype.diagnosis.filtered %>% 
+    tibble::column_to_rownames("participant_id") %>% 
+    .[,samples.with.celltype.data.and.covs] %>% 
+    tibble::rownames_to_column("participant_id") %>% 
+    tibble::as.tibble() %>% 
+    dplyr::rename(variable=participant_id)
+  
+  new.cov.table = rbind(existing.cov.table.filtered, ordered.celltype.diagnosis.filtered) %>% .[!duplicated(as.list(.))]
+  
+  new.cov.table %>% readr::write_csv(x=, file=paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/celltype_plus_standard_correction_with_PEER/PP_",diagnosis,"_maf0.05_cov_table_for_MatrixEQTL.csv"))
+}
+
+```
+
+```{r}
+
+for(diagnosis in c("cohort")){
+  
+  existing.cov.table = readr::read_csv(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/PP_",diagnosis,"_maf0.05_cov_table_for_MatrixEQTL.csv"))
+  
+  # filter and reshape celltype data
+  celltype.diagnosis.filtered = PP.celltype.prop.screening %>% 
+    dplyr::filter( (case_control_other_latest=="Case" | case_control_other_latest=="Control")) %>% 
+    dplyr::select(-case_control_other_latest) %>% 
+    tibble::column_to_rownames("participant_id") %>% 
+    t() %>% 
+    as.data.frame() %>% 
+    dplyr::mutate_all(na_if,"") %>% 
+    .[,colSums(is.na(.))<nrow(.)] %>% 
+    tibble::rownames_to_column("participant_id") %>% 
+    tibble::as.tibble() %>% 
+    `colnames<-`(paste0(colnames(.), "-BLM0T1")) %>% 
+    dplyr::rename(participant_id=`participant_id-BLM0T1`)
+  
+  # get samples with celltype and covariate data
+  samples.with.celltype.data.and.covs = intersect(
+    # get sample with covariate data for PP control
+    existing.cov.table %>% colnames(.) %>% .[-1],
+    # get samples with celltype data for PP control 
+    celltype.diagnosis.filtered %>% colnames(.) %>% .[-1]
+  ) #
+  
+  length(samples.with.celltype.data.and.covs) %>% print()
+  
+  # filter existing covariate table and then add celltype metadata to it
+  existing.cov.table.filtered = existing.cov.table %>% 
+    tibble::column_to_rownames("variable") %>% 
+    .[,samples.with.celltype.data.and.covs] %>% 
+    tibble::rownames_to_column("variable") %>% 
+    tibble::as.tibble()
+  
+  # filter celltype table and order
+  ordered.celltype.diagnosis.filtered = celltype.diagnosis.filtered %>% 
+    tibble::column_to_rownames("participant_id") %>% 
+    .[,samples.with.celltype.data.and.covs] %>% 
+    tibble::rownames_to_column("participant_id") %>% 
+    tibble::as.tibble() %>% 
+    dplyr::rename(variable=participant_id)
+  
+  # for 'cohort', case_control_other_baseline needs to be the last cov, as this is what the LINEARCROSS assesses the samples against 
+  new.cov.table = rbind(ordered.celltype.diagnosis.filtered, existing.cov.table.filtered) %>% .[!duplicated(as.list(.))]
+  
+  new.cov.table %>% readr::write_csv(x=, file=paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/celltype_plus_standard_correction_with_PEER/PP_",diagnosis,"_maf0.05_cov_table_for_MatrixEQTL.csv"))
+}
+
+```
+
+* Check output  
+
+```{r message=FALSE, warning=FALSE}
+
+PP.case.covs = readr::read_csv("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/celltype_plus_standard_correction_with_PEER/PP_Case_maf0.05_cov_table_for_MatrixEQTL.csv")
+
+print(paste(
+  nrow(PP.case.covs),
+  PP.case.covs %>% colnames(.) %>% .[!(.=="variable")] %>% length(.)
+))
+
+PP.case.covs %>% dplyr::pull(variable)
+
+PP.control.covs = readr::read_csv("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/celltype_plus_standard_correction_with_PEER/PP_Control_maf0.05_cov_table_for_MatrixEQTL.csv")
+
+print(paste(
+  nrow(PP.control.covs),
+  PP.control.covs %>% colnames(.) %>% .[!(.=="variable")] %>% length(.)
+))
+
+PP.control.covs %>% dplyr::pull(variable) 
+
+PP.cohort.covs = readr::read_csv("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/celltype_plus_standard_correction_with_PEER/PP_cohort_maf0.05_cov_table_for_MatrixEQTL.csv")
+
+print(paste(
+  nrow(PP.cohort.covs),
+  PP.cohort.covs %>% colnames(.) %>% .[!(.=="variable")] %>% length(.)
+))
+
+PP.cohort.covs %>% dplyr::pull(variable) 
+
+```
+
+* Get sample lists  
+
+```{r message=FALSE, warning=FALSE}
+
+PP.case.participant.id.with.celltypes = readr::read_csv("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/celltype_PP_samples_filtered/PP_Case_maf0.05_cov_table_for_MatrixEQTL.csv") %>% 
+  tibble::column_to_rownames("variable") %>% 
+  colnames(.)
+
+length(PP.case.participant.id.with.celltypes)
+
+PP.control.participant.id.with.celltypes = readr::read_csv("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/celltype_PP_samples_filtered/PP_Control_maf0.05_cov_table_for_MatrixEQTL.csv") %>% 
+  tibble::column_to_rownames("variable") %>% 
+  colnames(.)
+
+length(PP.control.participant.id.with.celltypes)
+
+PP.cohort.participant.id.with.celltypes = readr::read_csv("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/covariates/celltype_PP_samples_filtered/PP_cohort_maf0.05_cov_table_for_MatrixEQTL.csv") %>% 
+  tibble::column_to_rownames("variable") %>% 
+  colnames(.)
+
+length(PP.cohort.participant.id.with.celltypes)
+
+```
+
+# Filter wrangled genomics files for samples w/ cell type props  
+
+```{r message=FALSE, warning=FALSE}
+
+vroom::vroom(file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/PP_case_all_chrs-maf0.05_geno_matrix_012_wrangled-8b.csv") %>% 
+  tibble::column_to_rownames("pos") %>% 
+  dplyr::select(PP.case.participant.id.with.celltypes %>% gsub("-BLM0T1", "", .)) %>% 
+  tibble::rownames_to_column("pos") %>% 
+  vroom::vroom_write(x=., file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/celltype_PP_samples_filtered/PP_case_all_chrs-maf0.05_geno_matrix_012_celltype-filt-wrangled-8b.csv", delim=",")
+
+vroom::vroom(file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/PP_control_all_chrs-maf0.05_geno_matrix_012_wrangled-8b.csv") %>% 
+  tibble::column_to_rownames("pos") %>% 
+  dplyr::select(PP.control.participant.id.with.celltypes %>% gsub("-BLM0T1", "", .)) %>% 
+  tibble::rownames_to_column("pos") %>% 
+  vroom::vroom_write(x=., file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/celltype_PP_samples_filtered/PP_control_all_chrs-maf0.05_geno_matrix_012_celltype-filt-wrangled-8b.csv", delim=",")
+
+vroom::vroom(file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/PP_all_chrs-maf0.05_geno_matrix_012_wrangled-8b.csv") %>% 
+  tibble::column_to_rownames("pos") %>% 
+  dplyr::select(PP.cohort.participant.id.with.celltypes %>% gsub("-BLM0T1", "", .)) %>% 
+  tibble::rownames_to_column("pos") %>% 
+  vroom::vroom_write(x=., file="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/celltype_PP_samples_filtered/PP_cohort_all_chrs-maf0.05_geno_matrix_012_celltype-filt-wrangled-8b.csv", delim=",")
+
+```
+
+* Check output  
+
+```{r message=FALSE, warning=FALSE}
+
+# check num of samples in PP case genomics data file 
+vroom::vroom("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/celltype_PP_samples_filtered/PP_case_all_chrs-maf0.05_geno_matrix_012_celltype-filt-wrangled-8b.csv") %>% 
+  tibble::column_to_rownames("pos") %>% 
+  colnames(.) %>% 
+  length()
+
+# check num of samples in PP control genomics data file 
+vroom::vroom("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/celltype_PP_samples_filtered/PP_control_all_chrs-maf0.05_geno_matrix_012_celltype-filt-wrangled-8b.csv") %>% 
+  tibble::column_to_rownames("pos") %>% 
+  colnames(.) %>% 
+  length()
+
+# check num of samples in PP cohort genomics data file 
+vroom::vroom("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/genomics/celltype_PP_samples_filtered/PP_cohort_all_chrs-maf0.05_geno_matrix_012_celltype-filt-wrangled-8b.csv") %>% 
+  tibble::column_to_rownames("pos") %>% 
+  colnames(.) %>% 
+  length()
+
+```
+
+# Filter wrangled transcriptomic files for samples w/ cell type props  
+
+* Control
+
+```{r message=FALSE, warning=FALSE}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/", pattern="PP_Control_pheno.*MT_ONLY.csv")){
+  
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/",f)) %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    `colnames<-`(.[1,]) %>%
+    .[-1,] %>%
+    tibble::as.tibble() %>%
+    dplyr::filter(sample_id %in% PP.control.participant.id.with.celltypes) %>%
+    tibble::column_to_rownames("sample_id") %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    tibble::as.tibble() %>%
+    readr::write_csv(x=., file=paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/",f))
+  
+}
+
+```
+
+* Case  
+
+```{r message=FALSE, warning=FALSE}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/", pattern="PP_Case_pheno.*MT_ONLY.csv")){
+  
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/", f)) %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    `colnames<-`(.[1,]) %>%
+    .[-1,] %>%
+    tibble::as.tibble() %>%
+    dplyr::filter(sample_id %in% PP.case.participant.id.with.celltypes) %>%
+    tibble::column_to_rownames("sample_id") %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    tibble::as.tibble() %>%
+    vroom::vroom_write(x=., file=paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/",f))
+  
+}
+
+```
+
+* cohort  
+
+```{r message=FALSE, warning=FALSE}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/", pattern="PP_cohort_pheno.*MT_ONLY.csv")){
+  
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/", f)) %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    `colnames<-`(.[1,]) %>%
+    .[-1,] %>%
+    tibble::as.tibble() %>%
+    dplyr::filter(sample_id %in% PP.cohort.participant.id.with.celltypes) %>%
+    tibble::column_to_rownames("sample_id") %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    tibble::as.tibble() %>%
+    vroom::vroom_write(x=., file=paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/",f))
+  
+}
+
+```
+
+* Check output  
+
+```{r message=FALSE, warning=FALSE}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/", pattern="PP_Control_pheno.*MT_ONLY.csv")){
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/", f)) %>% 
+    colnames(.) %>% 
+    .[!(.=="sample_id")] %>% 
+    length() %>% 
+    print()
+}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/", pattern="PP_Case_pheno.*MT_ONLY.csv")){
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/", f)) %>% 
+    colnames(.) %>% 
+    .[!(.=="sample_id")] %>% 
+    length() %>% 
+    print()
+}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/", pattern="PP_cohort_pheno.*MT_ONLY.csv")){
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/transcriptomics/celltype_PP_samples_filtered/", f)) %>% 
+    colnames(.) %>% 
+    .[!(.=="sample_id")] %>% 
+    length() %>% 
+    print()
+}
+
+```
+
+# Filter wrangled methylomic files for samples w/ cell type props  
+
+* Control
+
+```{r message=FALSE, warning=FALSE}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/", pattern="PP_Control_pheno.*MatrixEQTL_input.csv")){
+  
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/",f)) %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    `colnames<-`(.[1,]) %>%
+    .[-1,] %>%
+    tibble::as.tibble() %>%
+    dplyr::filter(sample_id %in% PP.control.participant.id.with.celltypes) %>%
+    tibble::column_to_rownames("sample_id") %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    tibble::as.tibble() %>%
+    vroom::vroom_write(x=., file=paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/",f))
+  
+}
+
+```
+
+* Case  
+
+```{r message=FALSE, warning=FALSE}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/", pattern="PP_Case_pheno.*MatrixEQTL_input.csv")){
+  
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/",f)) %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    `colnames<-`(.[1,]) %>%
+    .[-1,] %>%
+    tibble::as.tibble() %>%
+    dplyr::filter(sample_id %in% PP.case.participant.id.with.celltypes) %>%
+    tibble::column_to_rownames("sample_id") %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    tibble::as.tibble() %>%
+    vroom::vroom_write(x=., file=paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/",f))
+  
+}
+
+```
+
+* cohort  
+
+```{r message=FALSE, warning=FALSE}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/", pattern="PP_cohort_pheno.*MatrixEQTL_input.csv")){
+  
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/",f)) %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    `colnames<-`(.[1,]) %>%
+    .[-1,] %>%
+    tibble::as.tibble() %>%
+    dplyr::filter(sample_id %in% PP.cohort.participant.id.with.celltypes) %>%
+    tibble::column_to_rownames("sample_id") %>%
+    t() %>%
+    as.data.frame() %>%
+    tibble::rownames_to_column("sample_id") %>%
+    tibble::as.tibble() %>%
+    vroom::vroom_write(x=., file=paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/",f))
+  
+}
+
+```
+
+* Check output  
+
+```{r message=FALSE, warning=FALSE}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/", pattern="PP_Control_pheno.*MatrixEQTL_input.csv")){
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/", f)) %>% 
+    colnames(.) %>% 
+    .[!(.=="sample_id")] %>% 
+    length() %>% 
+    print()
+}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/", pattern="PP_Case_pheno.*MatrixEQTL_input.csv")){
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/", f)) %>% 
+    colnames(.) %>% 
+    .[!(.=="sample_id")] %>% 
+    length() %>% 
+    print()
+}
+
+for(f in list.files(path="/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/", pattern="PP_cohort_pheno.*MatrixEQTL_input.csv")){
+  vroom::vroom(paste0("/home/abrowne/projects/amppd_analysis/data/MatrixEQTL_input/methylomics/celltype_PP_samples_filtered/", f)) %>% 
+    colnames(.) %>% 
+    .[!(.=="sample_id")] %>% 
+    length() %>% 
+    print()
+}
+
+```
+
+# Session Info  
+
+```{r}
+sessionInfo()
+```
+

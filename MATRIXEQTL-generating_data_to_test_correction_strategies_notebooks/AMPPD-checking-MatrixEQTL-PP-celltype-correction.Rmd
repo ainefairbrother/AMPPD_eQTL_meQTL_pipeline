@@ -1,0 +1,206 @@
+---
+title: ""
+author: "Aine Fairbrother-Browne"
+date: ""
+output: 
+  html_document:
+    theme: paper
+    highlight: kate
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: false  
+    fig_width: 20
+    fig_height: 15
+    fig_caption: true
+---
+
+**Aim**:
+
+# Setup  
+
+```{r setup, include=FALSE}
+
+# import libs
+library(tidyverse)
+library(parallel)
+
+# notebook settings 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/home/abrowne/projects/amppd_analysis/")
+
+```
+
+## Define helper functions  
+
+```{r}
+
+parallel.helper = function(fn, path, pattern, cores.to.use=3){
+  
+  # Run a function, fn, across files matching pattern, pattern, in directory, path. 
+  # This will produce whatever files fn is designed to output
+  file.list = list.files(path=path, pattern=pattern, full.names=T)
+  parallel::mclapply(file.list, fn, mc.cores=cores.to.use)
+  
+}
+
+lapply.helper = function(fn, path, pattern){
+  
+  # Run a function, fn, across files matching pattern, pattern, in directory, path. 
+  # This will produce whatever files fn is designed to output
+  file.list = list.files(path=path, pattern=pattern, full.names=T)
+  lapply(X=file.list, FUN=fn)
+  
+}
+
+loop.helper = function(fn, path, pattern){
+  
+  file.list = list.files(path=path, pattern=pattern, full.names=T)
+  for(i in 1:length(file.list)){
+    fn(file.list[i])
+  }
+}
+
+```
+
+# Read in `MatrixEQTL` results and filter appropriately  
+
+* Currently each file has 24 variables, which include: basic info (cohort, diagnosis, model), MatrixEQTL output stats, rsIDs, variantIDs, nearest gene info  
+* But the files are large, and contain lots of non-significant data that can be removed  
+* This will allow R to handle the data more easily  
+* So read in each file, filter appropriately, and add to list of dataframes   
+* Then merge into large dataframe  
+
+```{r message=FALSE, warning=FALSE}
+
+read.annot.file.apply.filter = function(file.path){
+  
+  d = vroom::vroom(file.path) 
+  
+  if( !("nearestGene.id" %in% colnames(d))) {
+    d = d %>% 
+      dplyr::mutate(nearestGene.symbol=NA, 
+                    nearestGene.id=NA,
+                    nearestGene.bioType=NA)
+  }
+  d %>%
+    # get only <5e-08 (genome wide sig) for the meta p.value
+    dplyr::filter(p.value<5e-08) %>%
+    # make snp col a number
+    dplyr::mutate(snp.chr=as.numeric(snp.chr)) %>% 
+    return(.)
+  
+}
+
+```
+
+## Save compiled + filtered MatrixEQTL results files    
+
+```{r message=FALSE, warning=FALSE}
+
+# compile and filter celltype corrected PP files 
+lapply.helper(fn=read.annot.file.apply.filter, path="./data/MatrixEQTL_output/celltype_PP_samples_filtered/", pattern="_wrangled.csv") %>% 
+  .[lapply(., length) > 0] %>% 
+  .[map(., ~dim(.)[1]) > 0] %>% 
+  dplyr::bind_rows() %>% 
+  readr::write_csv(x=., file="./data/MatrixEQTL_output/celltype_PP_samples_filtered/aggregated_tables/eqtl_res_filtered.csv")
+
+lapply.helper(fn=read.annot.file.apply.filter, path="./data/MatrixEQTL_output/", pattern="_wrangled.csv") %>% 
+  .[lapply(., length) > 0] %>% 
+  .[map(., ~dim(.)[1]) > 0] %>% 
+  dplyr::bind_rows() %>% 
+  readr::write_csv(x=., file="./data/MatrixEQTL_output/aggregated_tables/eqtl_res_filtered.csv")
+
+```
+
+# Read aggregate tables in  
+
+* This is so they don't have to be compiled each time  
+
+```{r message=FALSE, warning=FALSE}
+
+PP = dplyr::bind_rows(
+  readr::read_csv(file="./data/MatrixEQTL_output/celltype_PP_samples_filtered/aggregated_tables/eqtl_res_filtered.csv") %>% 
+    dplyr::mutate(correction.applied="celltype"),
+  readr::read_csv(file="./data/MatrixEQTL_output/aggregated_tables/eqtl_res_filtered.csv") %>% 
+    dplyr::mutate(correction.applied="standard")
+)
+
+```
+
+```{r}
+
+PP %>% 
+  dplyr::select(cohort, diagnosis, phenotype.category, matrixeqtl.model.run, phenotype, snp.chr.pos, beta, correction.applied) %>% 
+  dplyr::filter(cohort=="PP") %>% 
+  dplyr::distinct() %>% 
+  dplyr::group_by(cohort, diagnosis, phenotype.category, correction.applied) %>% 
+  dplyr::summarise(n=n()) %>% 
+  dplyr::arrange(correction.applied, phenotype.category) %>% 
+  tidyr::pivot_wider(., id_cols=c("cohort", "diagnosis", "phenotype.category", "correction.applied"), names_from="correction.applied", values_from="n")
+
+# count properly --- using groups 
+
+
+```
+
+```{r}
+
+PP %>% 
+  dplyr::distinct() %>% 
+  tidyr::pivot_wider(., id_cols=c("cohort", "diagnosis", "phenotype.category", "matrixeqtl.model.run", "phenotype", "snp.chr.pos", "correction.applied"), names_from="correction.applied", values_from="beta") %>% 
+  
+  ggplot(data=., aes(x=celltype, y=standard)) + 
+    geom_point() +
+    xlim(-1, 1) +
+    ylim(-1, 1)
+
+```
+
+
+# Compare the two correction strategies  
+
+```{r}
+
+PP %>% 
+  dplyr::filter(phenotype.category=="expression") %>% 
+  dplyr::filter(diagnosis=="cohort") %>% 
+  dplyr::filter(cohort=="PP") %>% 
+  dplyr::filter(correction.applied=="celltype") %>% 
+  dim()
+
+PP %>% 
+  dplyr::filter(phenotype.category=="expression") %>% 
+  dplyr::filter(diagnosis=="cohort") %>% 
+  dplyr::filter(cohort=="PP") %>% 
+  dplyr::filter(correction.applied=="standard") %>% 
+  dim()
+
+```
+
+```{r}
+
+PP %>% 
+  dplyr::filter(phenotype.category=="methylation") %>% 
+  dplyr::filter(diagnosis=="cohort") %>% 
+  dplyr::filter(cohort=="PP") %>% 
+  dplyr::filter(correction.applied=="celltype") %>% 
+  dim()
+
+PP %>% 
+  dplyr::filter(phenotype.category=="methylation") %>% 
+  dplyr::filter(diagnosis=="cohort") %>% 
+  dplyr::filter(cohort=="PP") %>% 
+  dplyr::filter(correction.applied=="standard") %>% 
+  dim()
+
+```
+
+
+# Session Info  
+
+```{r}
+sessionInfo()
+```
+
